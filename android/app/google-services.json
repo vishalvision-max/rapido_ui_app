@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "927337069135",
+    "project_id": "rapido-59e28",
+    "storage_bucket": "rapido-59e28.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:927337069135:android:e0f6777cd8e76b862c883a",
+        "android_client_info": {
+          "package_name": "com.example.rapido_ui_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAsH6AKaWfNfxq00wrywdS1ND1eYSODKas"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

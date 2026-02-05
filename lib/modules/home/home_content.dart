@@ -1,9 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:latlong2/latlong.dart';
 import '../../core/colors.dart';
+import '../../core/constants.dart';
+import '../../models/driver_location_model.dart';
+import '../../services/place_search_service.dart';
+import '../../services/route_service.dart';
 
 /// Home content controller
 class HomeContentController extends GetxController {
@@ -11,19 +19,36 @@ class HomeContentController extends GetxController {
   final TextEditingController dropController = TextEditingController();
   final RxString selectedService = 'Bike'.obs;
 
-  GoogleMapController? mapController;
+  final MapController mapController = MapController();
   final Rx<LatLng> currentPosition = const LatLng(12.9716, 77.5946).obs;
   final RxBool isLoadingLocation = false.obs;
-  final RxSet<Marker> markers = <Marker>{}.obs;
+  final RxList<Marker> markers = <Marker>[].obs;
+  final RxMap<String, DriverLocationModel> _driverLocations =
+      <String, DriverLocationModel>{}.obs;
+  final DatabaseReference _driversRef = FirebaseDatabase.instance.ref(
+    AppConstants.driversPath,
+  );
+  StreamSubscription<DatabaseEvent>? _driversSubscription;
+  StreamSubscription<Position>? _positionSubscription;
+  final PlaceSearchService _placeSearchService = PlaceSearchService();
+  final RouteService _routeService = RouteService();
+  static const double _nearbyRadiusMeters = 3000;
+  final RxList<PlaceSearchResult> searchResults = <PlaceSearchResult>[].obs;
+  final RxBool searching = false.obs;
+  final Rx<ActiveSearchField> activeField = ActiveSearchField.pickup.obs;
+  Timer? _searchDebounce;
+
+  LatLng? pickupLatLng;
+  LatLng? dropLatLng;
+  final RxList<LatLng> routePoints = <LatLng>[].obs;
+  final RxBool routeLoading = false.obs;
 
   @override
   void onInit() {
     super.onInit();
     fetchCurrentLocation();
-  }
-
-  void onMapCreated(GoogleMapController controller) {
-    mapController = controller;
+    _startDriverListener();
+    _startLocationStream();
   }
 
   Future<void> fetchCurrentLocation() async {
@@ -33,6 +58,10 @@ class HomeContentController extends GetxController {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
 
       Position position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
@@ -41,9 +70,12 @@ class HomeContentController extends GetxController {
       );
 
       currentPosition.value = LatLng(position.latitude, position.longitude);
+      if (pickupController.text.isEmpty) {
+        pickupController.text = "Current Location";
+        pickupLatLng = currentPosition.value;
+      }
       _updateMarkers();
       _updateMapCamera();
-      pickupController.text = "Current Location";
     } catch (e) {
       debugPrint('Location Fetch Error: $e');
     } finally {
@@ -51,25 +83,224 @@ class HomeContentController extends GetxController {
     }
   }
 
-  void _updateMarkers() {
-    markers.assignAll({
-      Marker(
-        markerId: const MarkerId('currentLocation'),
-        position: currentPosition.value,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
-      ),
+  void _startLocationStream() {
+    _positionSubscription?.cancel();
+    _positionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
+          ),
+        ).listen((Position position) {
+          currentPosition.value = LatLng(position.latitude, position.longitude);
+          if (pickupLatLng == null &&
+              pickupController.text == "Current Location") {
+            pickupLatLng = currentPosition.value;
+          }
+          _updateMarkers();
+        });
+  }
+
+  void setActiveField(ActiveSearchField field) {
+    activeField.value = field;
+  }
+
+  void onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    if (activeField.value == ActiveSearchField.pickup) {
+      pickupLatLng = null;
+    } else {
+      dropLatLng = null;
+    }
+    routePoints.clear();
+    _updateMarkers();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () async {
+      final String query = value.trim();
+      if (query.isEmpty) {
+        searchResults.clear();
+        searching.value = false;
+        return;
+      }
+      searching.value = true;
+      final List<PlaceSearchResult> results = await _placeSearchService.search(
+        query,
+        near: currentPosition.value,
+        radiusKm: 5,
+      );
+      searchResults.assignAll(results);
+      searching.value = false;
     });
   }
 
-  void _updateMapCamera() {
-    mapController?.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(target: currentPosition.value, zoom: 16),
-      ),
+  void selectSearchResult(PlaceSearchResult result) {
+    if (activeField.value == ActiveSearchField.pickup) {
+      pickupController.text = result.displayName;
+      pickupLatLng = result.location;
+    } else {
+      dropController.text = result.displayName;
+      dropLatLng = result.location;
+    }
+
+    mapController.move(result.location, 16);
+    searchResults.clear();
+    _updateMarkers();
+    _tryBuildRoute();
+  }
+
+  void useCurrentLocationForPickup() {
+    pickupController.text = "Current Location";
+    pickupLatLng = currentPosition.value;
+    mapController.move(currentPosition.value, 16);
+    searchResults.clear();
+    _updateMarkers();
+    _tryBuildRoute();
+  }
+
+  Future<void> _tryBuildRoute() async {
+    if (pickupLatLng == null || dropLatLng == null) return;
+    routeLoading.value = true;
+    final List<LatLng> points = await _routeService.fetchRoute(
+      start: pickupLatLng!,
+      end: dropLatLng!,
+    );
+    routePoints.assignAll(points);
+    routeLoading.value = false;
+    if (points.isNotEmpty) {
+      _fitRouteBounds(points);
+    }
+  }
+
+  void _fitRouteBounds(List<LatLng> points) {
+    final LatLngBounds bounds = LatLngBounds.fromPoints(points);
+    mapController.fitCamera(
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)),
     );
   }
 
+  void _startDriverListener() {
+    _driversSubscription?.cancel();
+    _driversSubscription = _driversRef
+        .orderByChild('isOnline')
+        .equalTo(true)
+        .onValue
+        .listen((event) {
+          final Object? data = event.snapshot.value;
+          if (data is Map<dynamic, dynamic>) {
+            final Map<String, DriverLocationModel> parsed = {};
+            data.forEach((key, value) {
+              if (value is Map<dynamic, dynamic>) {
+                parsed[key.toString()] = DriverLocationModel.fromMap(value);
+              }
+            });
+            _driverLocations.assignAll(parsed);
+          } else {
+            _driverLocations.clear();
+          }
+          _updateMarkers();
+        });
+  }
+
+  void _updateMarkers() {
+    final List<Marker> nextMarkers = [
+      Marker(
+        point: currentPosition.value,
+        width: 48,
+        height: 48,
+        child: const Icon(
+          Icons.my_location,
+          color: AppColors.primaryYellow,
+          size: 36,
+        ),
+      ),
+    ];
+
+    if (pickupLatLng != null) {
+      nextMarkers.add(
+        Marker(
+          point: pickupLatLng!,
+          width: 44,
+          height: 44,
+          child: const Icon(
+            Icons.my_location,
+            color: AppColors.success,
+            size: 30,
+          ),
+        ),
+      );
+    }
+
+    if (dropLatLng != null) {
+      nextMarkers.add(
+        Marker(
+          point: dropLatLng!,
+          width: 44,
+          height: 44,
+          child: const Icon(
+            Icons.location_on,
+            color: AppColors.error,
+            size: 32,
+          ),
+        ),
+      );
+    }
+
+    final LatLng center = currentPosition.value;
+    _driverLocations.forEach((driverId, driver) {
+      if (!driver.isOnline) return;
+      final double distance = Geolocator.distanceBetween(
+        center.latitude,
+        center.longitude,
+        driver.lat,
+        driver.lng,
+      );
+      if (distance <= _nearbyRadiusMeters) {
+        nextMarkers.add(
+          Marker(
+            point: LatLng(driver.lat, driver.lng),
+            width: 40,
+            height: 40,
+            child: const Icon(Icons.navigation, color: Colors.green, size: 28),
+          ),
+        );
+      }
+    });
+
+    markers.assignAll(nextMarkers);
+  }
+
+  void _updateMapCamera() {
+    mapController.move(currentPosition.value, 16);
+  }
+
+  @override
+  void onClose() {
+    _driversSubscription?.cancel();
+    _positionSubscription?.cancel();
+    _searchDebounce?.cancel();
+    pickupController.dispose();
+    dropController.dispose();
+    super.onClose();
+  }
+
   void bookRide() {
+    if (pickupLatLng == null || dropLatLng == null) {
+      Get.snackbar(
+        'Missing location',
+        'Please choose pickup and drop locations',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+      return;
+    }
+    if (routePoints.isEmpty) {
+      Get.snackbar(
+        'Route not ready',
+        'Please wait for the route to load',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+      return;
+    }
     if (dropController.text.isEmpty) {
       Get.snackbar(
         'Where to?',
@@ -86,10 +317,16 @@ class HomeContentController extends GetxController {
             ? "Current Location"
             : pickupController.text,
         'drop': dropController.text,
+        'pickupLat': pickupLatLng!.latitude,
+        'pickupLng': pickupLatLng!.longitude,
+        'dropLat': dropLatLng!.latitude,
+        'dropLng': dropLatLng!.longitude,
       },
     );
   }
 }
+
+enum ActiveSearchField { pickup, drop }
 
 class HomeContent extends StatelessWidget {
   const HomeContent({super.key});
@@ -104,17 +341,32 @@ class HomeContent extends StatelessWidget {
         children: [
           // 1. Full Screen Map
           Obx(
-            () => GoogleMap(
-              onMapCreated: controller.onMapCreated,
-              initialCameraPosition: CameraPosition(
-                target: controller.currentPosition.value,
-                zoom: 16,
+            () => FlutterMap(
+              mapController: controller.mapController,
+              options: MapOptions(
+                initialCenter: controller.currentPosition.value,
+                initialZoom: 16,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all,
+                ),
               ),
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              markers: controller.markers,
-              style: _mapStyle, // Custom map style could be added here
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.rapido.ui',
+                ),
+                if (controller.routePoints.isNotEmpty)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: controller.routePoints,
+                        strokeWidth: 5,
+                        color: Colors.blue,
+                      ),
+                    ],
+                  ),
+                MarkerLayer(markers: controller.markers),
+              ],
             ),
           ),
 
@@ -235,8 +487,8 @@ class HomeContent extends StatelessWidget {
 
           // 3. Bottom Sheet UI (Expandable & Draggable)
           DraggableScrollableSheet(
-            initialChildSize: 0.45,
-            minChildSize: 0.4,
+            initialChildSize: 0.35,
+            minChildSize: 0.12,
             maxChildSize: 0.9,
             builder: (context, scrollController) {
               return Container(
@@ -572,6 +824,8 @@ class HomeContent extends StatelessWidget {
             const SizedBox(height: 20),
             TextField(
               controller: controller.pickupController,
+              onTap: () => controller.setActiveField(ActiveSearchField.pickup),
+              onChanged: controller.onSearchChanged,
               decoration: InputDecoration(
                 prefixIcon: const Icon(
                   Icons.my_location,
@@ -584,6 +838,8 @@ class HomeContent extends StatelessWidget {
             const SizedBox(height: 12),
             TextField(
               controller: controller.dropController,
+              onTap: () => controller.setActiveField(ActiveSearchField.drop),
+              onChanged: controller.onSearchChanged,
               decoration: InputDecoration(
                 prefixIcon: const Icon(
                   Icons.location_on,
@@ -594,16 +850,72 @@ class HomeContent extends StatelessWidget {
               ),
               autofocus: true,
             ),
+            const SizedBox(height: 12),
+            Obx(() {
+              final bool showCurrentLocationOption =
+                  controller.activeField.value == ActiveSearchField.pickup &&
+                  controller.pickupController.text.isEmpty;
+              final bool showList = controller.searchResults.isNotEmpty;
+              if (!showCurrentLocationOption && !showList) {
+                return const SizedBox.shrink();
+              }
+              return Container(
+                constraints: const BoxConstraints(maxHeight: 260),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    if (showCurrentLocationOption)
+                      ListTile(
+                        leading: const Icon(
+                          Icons.my_location,
+                          color: AppColors.success,
+                        ),
+                        title: const Text('Use current location'),
+                        onTap: controller.useCurrentLocationForPickup,
+                      ),
+                    if (controller.searching.value)
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    if (!controller.searching.value)
+                      ...controller.searchResults.map(
+                        (result) => ListTile(
+                          leading: const Icon(Icons.place_rounded),
+                          title: Text(
+                            result.displayName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => controller.selectSearchResult(result),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }),
             const SizedBox(height: 30),
             SizedBox(
               width: double.infinity,
               height: 54,
-              child: ElevatedButton(
-                onPressed: () {
-                  Get.back();
-                  controller.bookRide();
-                },
-                child: const Text('Confirm Locations'),
+              child: Obx(
+                () => ElevatedButton(
+                  onPressed: controller.routeLoading.value
+                      ? null
+                      : () {
+                          Get.back();
+                          controller.bookRide();
+                        },
+                  child: controller.routeLoading.value
+                      ? const Text('Loading route...')
+                      : const Text('OK'),
+                ),
               ),
             ),
           ],
@@ -680,9 +992,6 @@ class HomeContent extends StatelessWidget {
       onTap: () {},
     );
   }
-
-  static const String _mapStyle =
-      ""; // Placeholder for custom dark/retro map style
 }
 
 class NotificationsScreen extends StatelessWidget {

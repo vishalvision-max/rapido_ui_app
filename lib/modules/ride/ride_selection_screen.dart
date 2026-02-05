@@ -7,6 +7,10 @@ import '../../core/colors.dart';
 class RideSelectionController extends GetxController {
   late String pickup;
   late String drop;
+  late double pickupLat;
+  late double pickupLng;
+  late double dropLat;
+  late double dropLng;
   final RxString selectedRideType = 'bike'.obs;
   final RxDouble estimatedFare = 45.0.obs;
   final RxDouble bidFare = 45.0.obs;
@@ -17,9 +21,13 @@ class RideSelectionController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    final args = Get.arguments as Map<String, String>;
-    pickup = args['pickup'] ?? 'Current Location';
-    drop = args['drop'] ?? '';
+    final args = (Get.arguments ?? <String, dynamic>{}) as Map<String, dynamic>;
+    pickup = (args['pickup'] ?? 'Current Location').toString();
+    drop = (args['drop'] ?? '').toString();
+    pickupLat = (args['pickupLat'] ?? 0.0).toDouble();
+    pickupLng = (args['pickupLng'] ?? 0.0).toDouble();
+    dropLat = (args['dropLat'] ?? 0.0).toDouble();
+    dropLng = (args['dropLng'] ?? 0.0).toDouble();
     calculateFare();
   }
 
@@ -70,6 +78,10 @@ class RideSelectionController extends GetxController {
       arguments: {
         'pickup': pickup,
         'drop': drop,
+        'pickupLat': pickupLat,
+        'pickupLng': pickupLng,
+        'dropLat': dropLat,
+        'dropLng': dropLng,
         'rideType': selectedRideType.value,
         'fare': estimatedFare.value,
       },
@@ -407,12 +419,17 @@ class RideSelectionScreen extends StatelessWidget {
   }
 
   void confirmRideWithFare(double fare) {
+    final controller = Get.find<RideSelectionController>();
     Get.toNamed(
       '/searching-rider',
       arguments: {
-        'pickup': Get.find<RideSelectionController>().pickup,
-        'drop': Get.find<RideSelectionController>().drop,
-        'rideType': Get.find<RideSelectionController>().selectedRideType.value,
+        'pickup': controller.pickup,
+        'drop': controller.drop,
+        'pickupLat': controller.pickupLat,
+        'pickupLng': controller.pickupLng,
+        'dropLat': controller.dropLat,
+        'dropLng': controller.dropLng,
+        'rideType': controller.selectedRideType.value,
         'fare': fare,
       },
     );

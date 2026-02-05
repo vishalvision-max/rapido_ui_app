@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_maps_flutter_android/google_maps_flutter_android.dart';
-import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
 import 'core/theme/app_theme.dart';
 import 'modules/auth/splash_screen.dart';
 import 'modules/auth/login_screen.dart';
@@ -18,20 +16,13 @@ import 'modules/rider/rider_ride_history_screen.dart';
 import 'modules/rider/redeem_earnings_screen.dart';
 import 'modules/rider/captain_documents_screen.dart';
 import 'core/bindings/initial_binding.dart';
+import 'core/firebase_config.dart';
+import 'screens/driver_map_screen.dart';
+import 'screens/rider_tracking_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final GoogleMapsFlutterPlatform mapsImplementation =
-      GoogleMapsFlutterPlatform.instance;
-  if (mapsImplementation is GoogleMapsFlutterAndroid) {
-    debugPrint('Configuring Google Maps to use TextureView...');
-    mapsImplementation.useAndroidViewSurface = false;
-    try {
-      mapsImplementation.initializeWithRenderer(AndroidMapRenderer.latest);
-    } catch (e) {
-      debugPrint('Error initializing Google Maps renderer: $e');
-    }
-  }
+  await FirebaseConfig.init();
   runApp(const RapidoApp());
 }
 
@@ -121,6 +112,16 @@ class RapidoApp extends StatelessWidget {
           name: '/rider-docs',
           page: () => const CaptainDocumentsScreen(),
           transition: Transition.rightToLeft,
+        ),
+        GetPage(
+          name: '/driver-map',
+          page: () => const DriverMapScreen(),
+          transition: Transition.fadeIn,
+        ),
+        GetPage(
+          name: '/rider-tracking',
+          page: () => const RiderTrackingScreen(),
+          transition: Transition.fadeIn,
         ),
       ],
     );

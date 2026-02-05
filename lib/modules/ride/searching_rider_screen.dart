@@ -1,7 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../../core/colors.dart';
+import '../../services/ride_request_service.dart';
+import '../../core/constants.dart';
 
 class SearchingRiderController extends GetxController
     with GetSingleTickerProviderStateMixin {
@@ -9,17 +18,37 @@ class SearchingRiderController extends GetxController
   late String drop;
   late String rideType;
   late double fare;
+  late LatLng pickupLatLng;
+  late LatLng dropLatLng;
 
   late AnimationController pulseController;
+  final MapController mapController = MapController();
+  final RxList<Marker> markers = <Marker>[].obs;
+  final RxList<LatLng> driverPoints = <LatLng>[].obs;
+  final RideRequestService _rideRequestService = RideRequestService();
+  final DatabaseReference _driversRef =
+      FirebaseDatabase.instance.ref(AppConstants.driversPath);
+  StreamSubscription<DatabaseEvent>? _driversSub;
+  StreamSubscription<DatabaseEvent>? _requestSub;
+  String? _requestId;
+  static const double _nearbyRadiusMeters = 3000;
 
   @override
   void onInit() {
     super.onInit();
-    final args = Get.arguments as Map<String, dynamic>;
-    pickup = args['pickup'] ?? 'Current Location';
-    drop = args['drop'] ?? '';
-    rideType = args['rideType'] ?? 'bike';
-    fare = args['fare'] ?? 0.0;
+    final args = (Get.arguments ?? <String, dynamic>{}) as Map<String, dynamic>;
+    pickup = (args['pickup'] ?? 'Current Location').toString();
+    drop = (args['drop'] ?? '').toString();
+    rideType = (args['rideType'] ?? 'bike').toString();
+    fare = (args['fare'] ?? 0.0).toDouble();
+    pickupLatLng = LatLng(
+      (args['pickupLat'] ?? 0.0).toDouble(),
+      (args['pickupLng'] ?? 0.0).toDouble(),
+    );
+    dropLatLng = LatLng(
+      (args['dropLat'] ?? 0.0).toDouble(),
+      (args['dropLng'] ?? 0.0).toDouble(),
+    );
 
     pulseController = AnimationController(
       vsync: this,
@@ -27,26 +56,125 @@ class SearchingRiderController extends GetxController
     );
     pulseController.repeat();
 
-    _searchForRider();
+    _createRideRequest();
+    _startDriverListener();
+    _updateMarkers();
   }
 
-  void _searchForRider() {
-    Future.delayed(const Duration(seconds: 5), () {
-      Get.offNamed(
-        '/ride-details',
-        arguments: {
-          'pickup': pickup,
-          'drop': drop,
-          'rideType': rideType,
-          'fare': fare,
-        },
-      );
+  Future<void> _createRideRequest() async {
+    final String riderId =
+        FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    _requestId = await _rideRequestService.createRideRequest(
+      riderId: riderId,
+      pickupText: pickup,
+      dropText: drop,
+      pickup: pickupLatLng,
+      drop: dropLatLng,
+      rideType: rideType,
+      fare: fare,
+    );
+
+    _requestSub = _rideRequestService.watchRequest(_requestId!).listen((event) {
+      final Object? data = event.snapshot.value;
+      if (data is Map<dynamic, dynamic>) {
+        final String status = (data['status'] ?? '').toString();
+        if (status == 'accepted') {
+          final String driverId =
+              (data['assignedDriverId'] ?? '').toString();
+          Get.offNamed(
+            '/ride-details',
+            arguments: {
+              'pickup': pickup,
+              'drop': drop,
+              'rideType': rideType,
+              'fare': fare,
+              'requestId': _requestId,
+              'driverId': driverId,
+            },
+          );
+        }
+      }
     });
+  }
+
+  void _startDriverListener() {
+    _driversSub?.cancel();
+    _driversSub = _driversRef
+        .orderByChild('isOnline')
+        .equalTo(true)
+        .onValue
+        .listen((event) {
+      final Object? data = event.snapshot.value;
+      final List<LatLng> points = [];
+      if (data is Map<dynamic, dynamic>) {
+        data.forEach((_, value) {
+          if (value is Map<dynamic, dynamic>) {
+            final double lat = (value['lat'] ?? 0).toDouble();
+            final double lng = (value['lng'] ?? 0).toDouble();
+            final double distance = Geolocator.distanceBetween(
+              pickupLatLng.latitude,
+              pickupLatLng.longitude,
+              lat,
+              lng,
+            );
+            if (distance <= _nearbyRadiusMeters) {
+              points.add(LatLng(lat, lng));
+            }
+          }
+        });
+      }
+      driverPoints.assignAll(points);
+      _updateMarkers();
+    });
+  }
+
+  void _updateMarkers() {
+    final List<Marker> nextMarkers = [
+      Marker(
+        point: pickupLatLng,
+        width: 44,
+        height: 44,
+        child: const Icon(
+          Icons.my_location,
+          color: AppColors.success,
+          size: 30,
+        ),
+      ),
+      Marker(
+        point: dropLatLng,
+        width: 44,
+        height: 44,
+        child: const Icon(
+          Icons.location_on,
+          color: AppColors.error,
+          size: 32,
+        ),
+      ),
+    ];
+
+    for (final point in driverPoints) {
+      nextMarkers.add(
+        Marker(
+          point: point,
+          width: 40,
+          height: 40,
+          child: const Icon(
+            Icons.navigation,
+            color: Colors.green,
+            size: 28,
+          ),
+        ),
+      );
+    }
+
+    markers.assignAll(nextMarkers);
   }
 
   @override
   void onClose() {
     pulseController.dispose();
+    _driversSub?.cancel();
+    _requestSub?.cancel();
     super.onClose();
   }
 }
@@ -62,6 +190,29 @@ class SearchingRiderScreen extends StatelessWidget {
       backgroundColor: AppColors.primaryBlack,
       body: Stack(
         children: [
+          Obx(
+            () => FlutterMap(
+              mapController: controller.mapController,
+              options: MapOptions(
+                initialCenter: controller.pickupLatLng,
+                initialZoom: 14,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate:
+                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.rapido.ui',
+                ),
+                MarkerLayer(markers: controller.markers),
+              ],
+            ),
+          ),
+          Container(
+            color: AppColors.primaryBlack.withValues(alpha: 0.35),
+          ),
           // Radar Background
           Center(
             child: AnimatedBuilder(
