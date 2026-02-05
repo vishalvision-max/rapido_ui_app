@@ -47,6 +47,7 @@ dependencies:
   flutter_map: ^8.0.1
   latlong2: ^0.9.1
   http: ^1.2.2
+  google_sign_in: ^6.2.1
 
 dev_dependencies:
   flutter_test:

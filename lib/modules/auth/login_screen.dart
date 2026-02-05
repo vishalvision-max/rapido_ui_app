@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/colors.dart';
 import '../../core/controllers/role_controller.dart';
 
@@ -9,6 +10,7 @@ class LoginController extends GetxController {
   final TextEditingController phoneController = TextEditingController();
   final RxBool isLoading = false.obs;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   final Rx<CountryCode> selectedCountry =
       CountryCode(name: 'India', dialCode: '+91', flag: '🇮🇳').obs;
@@ -78,6 +80,44 @@ class LoginController extends GetxController {
       },
       codeAutoRetrievalTimeout: (String verificationId) {},
     );
+  }
+
+  Future<void> signInWithGoogle() async {
+    try {
+      isLoading.value = true;
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        isLoading.value = false;
+        return;
+      }
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      await _auth.signInWithCredential(credential);
+
+      final roleController = Get.find<RoleController>();
+      await roleController.ensureUserRecord();
+      final role = await roleController.fetchRole();
+      if (role == null) {
+        Get.offAllNamed('/role-selection');
+      } else if (roleController.isRider) {
+        Get.offAllNamed('/rider-home');
+      } else {
+        Get.offAllNamed('/home');
+      }
+    } on FirebaseAuthException catch (e) {
+      Get.snackbar(
+        'Google Sign-In Failed',
+        e.message ?? 'Unable to sign in',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
   }
 }
 
@@ -250,7 +290,12 @@ class LoginScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _socialIcon(Icons.g_mobiledata, Colors.red),
+                    GestureDetector(
+                      onTap: controller.isLoading.value
+                          ? null
+                          : controller.signInWithGoogle,
+                      child: _socialIcon(Icons.g_mobiledata, Colors.red),
+                    ),
                     const SizedBox(width: 20),
                     _socialIcon(Icons.facebook, Colors.blue[800]!),
                   ],
