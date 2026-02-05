@@ -94,7 +94,7 @@ class RapidoApp extends StatelessWidget {
         ),
         GetPage(
           name: '/rider-home',
-          page: () => const RiderHomeScreen(),
+          page: () => const DriverMapScreen(),
           transition: Transition.fadeIn,
         ),
         GetPage(

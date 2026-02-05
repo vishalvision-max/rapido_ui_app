@@ -357,7 +357,7 @@ class HomeContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.find<HomeContentController>();
+    final controller = Get.put(HomeContentController(), permanent: true);
 
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,

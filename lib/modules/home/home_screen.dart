@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/colors.dart';
 import '../ride/ride_history_screen.dart';
 import '../payment/wallet_screen.dart';
@@ -20,7 +21,6 @@ class MainNavigationController extends GetxController {
   final List<Widget> screens = [
     const HomeContent(),
     const RideHistoryScreen(),
-
     const WalletScreen(),
     const ProfileScreen(),
   ];
@@ -37,6 +37,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = Get.put(MainNavigationController(), permanent: true);
+    Get.put(RideHistoryController(), permanent: true);
     final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
 
     return Scaffold(
@@ -170,16 +171,14 @@ class HomeScreen extends StatelessWidget {
           ),
           const Spacer(),
           const Divider(),
-          _buildDrawerItem(
-            Icons.logout,
-            'Logout',
-            () async {
-              final roleController = Get.find<RoleController>();
-              await roleController.signOut();
-              Get.offAllNamed('/login');
-            },
-            color: AppColors.error,
-          ),
+          _buildDrawerItem(Icons.logout, 'Logout', () async {
+            final GoogleSignIn _googleSignIn = GoogleSignIn();
+
+            final roleController = Get.find<RoleController>();
+            await roleController.signOut();
+            _googleSignIn.signOut();
+            Get.offAllNamed('/login');
+          }, color: AppColors.error),
           const SizedBox(height: 20),
         ],
       ),

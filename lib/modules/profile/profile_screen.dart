@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/colors.dart';
 import '../../core/models/user.dart';
 import 'edit_profile_screen.dart';
@@ -20,6 +21,8 @@ class ProfileController extends GetxController {
   }
 
   void logout() {
+    final GoogleSignIn _googleSignIn = GoogleSignIn();
+
     Get.defaultDialog(
       title: 'Logout',
       middleText: 'Are you sure you want to logout?',
@@ -30,6 +33,7 @@ class ProfileController extends GetxController {
       cancelTextColor: AppColors.textPrimary,
       onConfirm: () {
         Get.back();
+        _googleSignIn.signOut();
         Get.offAllNamed('/login');
         Get.snackbar(
           'Success',

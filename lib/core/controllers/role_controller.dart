@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:firebase_database/firebase_database.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:uuid/uuid.dart';
 import '../models/user.dart';
 
 class RoleController extends GetxController {
   final Rx<UserRole> currentRole = UserRole.customer.obs;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
   final Uuid _uuid = const Uuid();
 
   final DatabaseReference _usersRef = FirebaseDatabase.instance.ref().child(
@@ -139,7 +141,13 @@ class RoleController extends GetxController {
   /// Sign out
   /// -------------------------------
   Future<void> signOut() async {
-    await fa.FirebaseAuth.instance.signOut();
+    try {
+      await _googleSignIn.signOut();
+      await _googleSignIn.disconnect();
+    } catch (_) {}
+    try {
+      await fa.FirebaseAuth.instance.signOut();
+    } catch (_) {}
     currentRole.value = UserRole.customer;
   }
 }
