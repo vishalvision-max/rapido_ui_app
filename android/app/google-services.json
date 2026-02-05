@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "927337069135",
+    "firebase_url": "https://rapido-59e28-default-rtdb.firebaseio.com",
     "project_id": "rapido-59e28",
     "storage_bucket": "rapido-59e28.firebasestorage.app"
   },
@@ -12,7 +13,28 @@
           "package_name": "com.example.rapido_ui_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "927337069135-4tovsnkegg8v7bn517to88o55s536na7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.rapido_ui_app",
+            "certificate_hash": "9b082ad68ea8d19dc08a4f44a7ae57247ccd1942"
+          }
+        },
+        {
+          "client_id": "927337069135-eqjo3d55q68v0h29o0aanrdb0i73a27d.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.rapido_ui_app",
+            "certificate_hash": "d64a2f2aabe58a8ce13fd7876b25a1a54e30f0bd"
+          }
+        },
+        {
+          "client_id": "927337069135-hf57ttpqknidq2063lddapn82h4ij691.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAsH6AKaWfNfxq00wrywdS1ND1eYSODKas"
@@ -20,7 +42,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "927337069135-hf57ttpqknidq2063lddapn82h4ij691.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "927337069135-crcbdbaujndupjnl4mgau80houpvcvrj.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.rapidoUiApp"
+              }
+            }
+          ]
         }
       }
     }

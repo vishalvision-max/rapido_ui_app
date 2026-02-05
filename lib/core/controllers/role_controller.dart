@@ -39,7 +39,7 @@ class RoleController extends GetxController {
     final fa.User? user = fa.FirebaseAuth.instance.currentUser;
     if (user == null) return;
     final DataSnapshot snap = await _usersRef.child(user.uid).get();
-    if (snap.exists) return;
+    if (snap.exists && snap.value is Map) return;
     await _usersRef.child(user.uid).set({
       'phone': user.phoneNumber,
       'role': null,

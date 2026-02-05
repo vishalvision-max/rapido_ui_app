@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'core/theme/app_theme.dart';
 import 'modules/auth/splash_screen.dart';
 import 'modules/auth/login_screen.dart';
@@ -23,6 +24,9 @@ import 'screens/rider_tracking_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FirebaseConfig.init();
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: AndroidProvider.debug,
+  );
   runApp(const RapidoApp());
 }
 
