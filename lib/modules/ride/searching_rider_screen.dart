@@ -26,8 +26,9 @@ class SearchingRiderController extends GetxController
   final RxList<Marker> markers = <Marker>[].obs;
   final RxList<LatLng> driverPoints = <LatLng>[].obs;
   final RideRequestService _rideRequestService = RideRequestService();
-  final DatabaseReference _driversRef =
-      FirebaseDatabase.instance.ref(AppConstants.driversPath);
+  final DatabaseReference _driversRef = FirebaseDatabase.instance.ref(
+    AppConstants.driversPath,
+  );
   StreamSubscription<DatabaseEvent>? _driversSub;
   StreamSubscription<DatabaseEvent>? _requestSub;
   StreamSubscription<User?>? _authSub;
@@ -65,8 +66,7 @@ class SearchingRiderController extends GetxController
   }
 
   Future<void> _createRideRequest() async {
-    final String riderId =
-        FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    final String riderId = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
     _requestId = await _rideRequestService.createRideRequest(
       riderId: riderId,
       pickupText: pickup,
@@ -83,8 +83,7 @@ class SearchingRiderController extends GetxController
         final String status = (data['status'] ?? '').toString();
         if (status == 'accepted') {
           _searchTimeout?.cancel();
-          final String driverId =
-              (data['assignedDriverId'] ?? '').toString();
+          final String driverId = (data['assignedDriverId'] ?? '').toString();
           Get.offNamed(
             '/ride-details',
             arguments: {
@@ -130,28 +129,45 @@ class SearchingRiderController extends GetxController
         .equalTo(true)
         .onValue
         .listen((event) {
-      final Object? data = event.snapshot.value;
-      final List<LatLng> points = [];
-      if (data is Map<dynamic, dynamic>) {
-        data.forEach((_, value) {
-          if (value is Map<dynamic, dynamic>) {
-            final double lat = (value['lat'] ?? 0).toDouble();
-            final double lng = (value['lng'] ?? 0).toDouble();
-            final double distance = Geolocator.distanceBetween(
-              pickupLatLng.latitude,
-              pickupLatLng.longitude,
-              lat,
-              lng,
-            );
-            if (distance <= _nearbyRadiusMeters) {
-              points.add(LatLng(lat, lng));
-            }
+          final Object? data = event.snapshot.value;
+          final List<LatLng> points = [];
+          if (data is Map<dynamic, dynamic>) {
+            data.forEach((_, value) {
+              if (value is Map<dynamic, dynamic>) {
+                final double lat = (value['lat'] ?? 0).toDouble();
+                final double lng = (value['lng'] ?? 0).toDouble();
+                final double distance = Geolocator.distanceBetween(
+                  pickupLatLng.latitude,
+                  pickupLatLng.longitude,
+                  lat,
+                  lng,
+                );
+                if (distance <= _nearbyRadiusMeters) {
+                  points.add(LatLng(lat, lng));
+                }
+              }
+            });
           }
+          driverPoints.assignAll(points);
+          _updateMarkers();
         });
+  }
+
+  void _bindAuth() {
+    _authSub?.cancel();
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        _driversSub?.cancel();
+        _driversSub = null;
+        driverPoints.clear();
+        _updateMarkers();
+      } else {
+        _startDriverListener();
       }
-      driverPoints.assignAll(points);
-      _updateMarkers();
     });
+    if (FirebaseAuth.instance.currentUser != null) {
+      _startDriverListener();
+    }
   }
 
   void _updateMarkers() {
@@ -170,11 +186,7 @@ class SearchingRiderController extends GetxController
         point: dropLatLng,
         width: 44,
         height: 44,
-        child: const Icon(
-          Icons.location_on,
-          color: AppColors.error,
-          size: 32,
-        ),
+        child: const Icon(Icons.location_on, color: AppColors.error, size: 32),
       ),
     ];
 
@@ -184,11 +196,7 @@ class SearchingRiderController extends GetxController
           point: point,
           width: 40,
           height: 40,
-          child: const Icon(
-            Icons.navigation,
-            color: Colors.green,
-            size: 28,
-          ),
+          child: const Icon(Icons.navigation, color: Colors.green, size: 28),
         ),
       );
     }
@@ -232,14 +240,10 @@ class SearchingRiderScreen extends StatelessWidget {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.rapido.ui',
               ),
-              Obx(
-                () => MarkerLayer(markers: controller.markers.toList()),
-              ),
+              Obx(() => MarkerLayer(markers: controller.markers.toList())),
             ],
           ),
-          Container(
-            color: AppColors.primaryBlack.withValues(alpha: 0.35),
-          ),
+          Container(color: AppColors.primaryBlack.withValues(alpha: 0.35)),
           // Radar Background
           Center(
             child: AnimatedBuilder(
@@ -379,8 +383,9 @@ class SearchingRiderScreen extends StatelessWidget {
                     child: TextButton(
                       onPressed: () async {
                         if (controller._requestId != null) {
-                          await controller._rideRequestService
-                              .cancelRequest(controller._requestId!);
+                          await controller._rideRequestService.cancelRequest(
+                            controller._requestId!,
+                          );
                         }
                         Get.back();
                       },
@@ -428,19 +433,3 @@ class SearchingRiderScreen extends StatelessWidget {
     }
   }
 }
-  void _bindAuth() {
-    _authSub?.cancel();
-    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user == null) {
-        _driversSub?.cancel();
-        _driversSub = null;
-        driverPoints.clear();
-        _updateMarkers();
-      } else {
-        _startDriverListener();
-      }
-    });
-    if (FirebaseAuth.instance.currentUser != null) {
-      _startDriverListener();
-    }
-  }
