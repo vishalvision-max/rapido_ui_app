@@ -12,8 +12,11 @@ class LoginController extends GetxController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
-  final Rx<CountryCode> selectedCountry =
-      CountryCode(name: 'India', dialCode: '+91', flag: '🇮🇳').obs;
+  final Rx<CountryCode> selectedCountry = CountryCode(
+    name: 'India',
+    dialCode: '+91',
+    flag: '🇮🇳',
+  ).obs;
 
   final List<CountryCode> countries = const [
     CountryCode(name: 'India', dialCode: '+91', flag: '🇮🇳'),
@@ -37,8 +40,7 @@ class LoginController extends GetxController {
     }
 
     final String number = raw.replaceAll(RegExp(r'\\s+'), '');
-    final String fullPhone =
-        '${selectedCountry.value.dialCode}$number';
+    final String fullPhone = '${selectedCountry.value.dialCode}$number';
 
     isLoading.value = true;
     await _auth.verifyPhoneNumber(
@@ -84,23 +86,42 @@ class LoginController extends GetxController {
 
   Future<void> signInWithGoogle() async {
     try {
+      debugPrint('Google Sign-In1: start');
       isLoading.value = true;
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      debugPrint('Google Sign-In2: account=${googleUser?.email}');
+
       if (googleUser == null) {
-        isLoading.value = false;
+        debugPrint('Google Sign-In3: user cancelled');
         return;
       }
+
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
+
+      debugPrint(
+        'Google Sign-In4: idToken=${googleAuth.idToken != null}, accessToken=${googleAuth.accessToken != null}',
+      );
+
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
+
       await _auth.signInWithCredential(credential);
+      debugPrint('Google Sign-In5: firebase auth success');
 
       final roleController = Get.find<RoleController>();
+
+      debugPrint('Google Sign-In6: ensureUserRecord');
       await roleController.ensureUserRecord();
+
+      debugPrint('Google Sign-In7: fetchRole');
       final role = await roleController.fetchRole();
+
+      debugPrint('Google Sign-In8: role=$role');
+
       if (role == null) {
         Get.offAllNamed('/role-selection');
       } else if (roleController.isRider) {
@@ -108,13 +129,9 @@ class LoginController extends GetxController {
       } else {
         Get.offAllNamed('/home');
       }
-    } on FirebaseAuthException catch (e) {
-      Get.snackbar(
-        'Google Sign-In Failed',
-        e.message ?? 'Unable to sign in',
-        backgroundColor: AppColors.error,
-        colorText: Colors.white,
-      );
+    } catch (e, st) {
+      debugPrint('Google Sign-In9 ERROR: $e');
+      debugPrint('STACKTRACE: $st');
     } finally {
       isLoading.value = false;
     }
