@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:latlong2/latlong.dart';
@@ -30,6 +31,7 @@ class HomeContentController extends GetxController {
   );
   StreamSubscription<DatabaseEvent>? _driversSubscription;
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<User?>? _authSubscription;
   final PlaceSearchService _placeSearchService = PlaceSearchService();
   final RouteService _routeService = RouteService();
   static const double _nearbyRadiusMeters = 3000;
@@ -47,8 +49,26 @@ class HomeContentController extends GetxController {
   void onInit() {
     super.onInit();
     fetchCurrentLocation();
-    _startDriverListener();
     _startLocationStream();
+    _bindAuth();
+  }
+
+  void _bindAuth() {
+    _authSubscription?.cancel();
+    _authSubscription =
+        FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        _driversSubscription?.cancel();
+        _driversSubscription = null;
+        _driverLocations.clear();
+        _updateMarkers();
+      } else {
+        _startDriverListener();
+      }
+    });
+    if (FirebaseAuth.instance.currentUser != null) {
+      _startDriverListener();
+    }
   }
 
   Future<void> fetchCurrentLocation() async {
@@ -276,6 +296,7 @@ class HomeContentController extends GetxController {
   void onClose() {
     _driversSubscription?.cancel();
     _positionSubscription?.cancel();
+    _authSubscription?.cancel();
     _searchDebounce?.cancel();
     pickupController.dispose();
     dropController.dispose();

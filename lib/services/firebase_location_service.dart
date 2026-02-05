@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../core/constants.dart';
@@ -11,6 +12,7 @@ class FirebaseLocationService {
   DatabaseReference driverRef(String driverId) => _driversRef.child(driverId);
 
   Future<void> setDriverOnline(String driverId, bool isOnline) async {
+    debugPrint('RTDB: setDriverOnline drivers/$driverId isOnline=$isOnline');
     await driverRef(driverId).update({
       'isOnline': isOnline,
       'updatedAt': ServerValue.timestamp,
@@ -22,6 +24,7 @@ class FirebaseLocationService {
     required Position position,
     required bool isOnline,
   }) async {
+    debugPrint('RTDB: updateDriverLocation drivers/$driverId');
     await driverRef(driverId).update({
       'lat': position.latitude,
       'lng': position.longitude,
@@ -33,6 +36,7 @@ class FirebaseLocationService {
   }
 
   Stream<DriverLocationModel?> watchDriverLocation(String driverId) {
+    debugPrint('RTDB: watchDriverLocation drivers/$driverId');
     return driverRef(driverId).onValue.map((event) {
       final Object? data = event.snapshot.value;
       if (data is Map<dynamic, dynamic>) {

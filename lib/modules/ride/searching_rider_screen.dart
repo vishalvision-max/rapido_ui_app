@@ -30,6 +30,7 @@ class SearchingRiderController extends GetxController
       FirebaseDatabase.instance.ref(AppConstants.driversPath);
   StreamSubscription<DatabaseEvent>? _driversSub;
   StreamSubscription<DatabaseEvent>? _requestSub;
+  StreamSubscription<User?>? _authSub;
   String? _requestId;
   static const double _nearbyRadiusMeters = 3000;
   Timer? _searchTimeout;
@@ -58,9 +59,9 @@ class SearchingRiderController extends GetxController
     pulseController.repeat();
 
     _createRideRequest();
-    _startDriverListener();
     _updateMarkers();
     _startSearchTimeout();
+    _bindAuth();
   }
 
   Future<void> _createRideRequest() async {
@@ -201,6 +202,7 @@ class SearchingRiderController extends GetxController
     _driversSub?.cancel();
     _requestSub?.cancel();
     _searchTimeout?.cancel();
+    _authSub?.cancel();
     super.onClose();
   }
 }
@@ -216,25 +218,24 @@ class SearchingRiderScreen extends StatelessWidget {
       backgroundColor: AppColors.primaryBlack,
       body: Stack(
         children: [
-          Obx(
-            () => FlutterMap(
-              mapController: controller.mapController,
-              options: MapOptions(
-                initialCenter: controller.pickupLatLng,
-                initialZoom: 14,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all,
-                ),
+          FlutterMap(
+            mapController: controller.mapController,
+            options: MapOptions(
+              initialCenter: controller.pickupLatLng,
+              initialZoom: 14,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
               ),
-              children: [
-                TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.rapido.ui',
-                ),
-                MarkerLayer(markers: controller.markers),
-              ],
             ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.rapido.ui',
+              ),
+              Obx(
+                () => MarkerLayer(markers: controller.markers.toList()),
+              ),
+            ],
           ),
           Container(
             color: AppColors.primaryBlack.withValues(alpha: 0.35),
@@ -427,3 +428,19 @@ class SearchingRiderScreen extends StatelessWidget {
     }
   }
 }
+  void _bindAuth() {
+    _authSub?.cancel();
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        _driversSub?.cancel();
+        _driversSub = null;
+        driverPoints.clear();
+        _updateMarkers();
+      } else {
+        _startDriverListener();
+      }
+    });
+    if (FirebaseAuth.instance.currentUser != null) {
+      _startDriverListener();
+    }
+  }

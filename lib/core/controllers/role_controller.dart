@@ -21,6 +21,7 @@ class RoleController extends GetxController {
     final fa.User? user = fa.FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    debugPrint('RTDB CALL: ensureUserRecord users/${user.uid}');
     final DatabaseReference userRef = _usersRef.child(user.uid);
     final DataSnapshot snap = await userRef.get();
 
@@ -48,6 +49,7 @@ class RoleController extends GetxController {
     final String? uid = fa.FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
 
+    debugPrint('RTDB CALL: fetchRole users/$uid');
     final DataSnapshot snap = await _usersRef.child(uid).get();
 
     debugPrint('--------------------------------');
@@ -107,6 +109,7 @@ class RoleController extends GetxController {
 
     currentRole.value = role;
 
+    debugPrint('RTDB CALL: setRole users/$uid role=${role.name}');
     await _usersRef.child(uid).update({
       'role': role == UserRole.rider ? 'driver' : 'customer',
       'updatedAt': ServerValue.timestamp,

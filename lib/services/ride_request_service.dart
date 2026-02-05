@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
 class RideRequestService {
@@ -16,6 +17,7 @@ class RideRequestService {
     required String rideType,
     required double fare,
   }) async {
+    debugPrint('RTDB: createRideRequest rideRequests');
     final DatabaseReference ref = _requestsRef.push();
     await ref.set({
       'riderId': riderId,
@@ -39,6 +41,7 @@ class RideRequestService {
     required String status,
     String? assignedDriverId,
   }) async {
+    debugPrint('RTDB: updateStatus rideRequests/$requestId status=$status');
     await requestRef(requestId).update({
       'status': status,
       if (assignedDriverId != null) 'assignedDriverId': assignedDriverId,
@@ -50,6 +53,7 @@ class RideRequestService {
     required String requestId,
     required String driverId,
   }) async {
+    debugPrint('RTDB: acceptRequest rideRequests/$requestId driver=$driverId');
     final result = await requestRef(requestId).runTransaction((current) {
       if (current == null) return Transaction.abort();
       if (current is! Map) return Transaction.abort();
@@ -69,10 +73,12 @@ class RideRequestService {
     required String requestId,
     required String driverId,
   }) async {
+    debugPrint('RTDB: rejectRequest rideRequests/$requestId driver=$driverId');
     await requestRef(requestId).child('rejectedBy/$driverId').set(true);
   }
 
   Future<void> cancelRequest(String requestId) async {
+    debugPrint('RTDB: cancelRequest rideRequests/$requestId');
     await requestRef(requestId).update({
       'status': 'cancelled',
       'updatedAt': ServerValue.timestamp,
@@ -80,6 +86,7 @@ class RideRequestService {
   }
 
   Future<void> timeoutRequest(String requestId) async {
+    debugPrint('RTDB: timeoutRequest rideRequests/$requestId');
     await requestRef(requestId).update({
       'status': 'timeout',
       'updatedAt': ServerValue.timestamp,
