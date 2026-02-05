@@ -39,6 +39,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   bool _permissionOk = false;
   bool _loading = true;
   String? _driverId;
+  bool _autoOnlineDone = false;
   List<_RideRequest> _allRequests = [];
   List<_RideRequest> _nearbyRequests = [];
   _RideRequest? _activeRequest;
@@ -74,6 +75,11 @@ class _DriverMapScreenState extends State<DriverMapScreen>
           : LatLng(current.latitude, current.longitude);
       _loading = false;
     });
+
+    if (permissionOk && _driverId != null && !_autoOnlineDone) {
+      _autoOnlineDone = true;
+      await _goOnline();
+    }
   }
 
   void _bindAuth() {
@@ -196,16 +202,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
 
   void _filterRequestsByDistance() {
     if (_currentPosition == null) return;
-    final LatLng me = _currentPosition!;
-    final List<_RideRequest> filtered = _allRequests.where((req) {
-      final double distance = Geolocator.distanceBetween(
-        me.latitude,
-        me.longitude,
-        req.pickup.latitude,
-        req.pickup.longitude,
-      );
-      return distance <= _nearbyRadiusMeters;
-    }).toList();
+    final List<_RideRequest> filtered = List<_RideRequest>.from(_allRequests);
     if (mounted) {
       setState(() {
         _nearbyRequests = filtered;
