@@ -123,6 +123,9 @@ class SearchingRiderController extends GetxController
   }
 
   void _startDriverListener() {
+    if (FirebaseAuth.instance.currentUser == null) {
+      return;
+    }
     _driversSub?.cancel();
     _driversSub = _driversRef
         .orderByChild('isOnline')

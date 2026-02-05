@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
 class RideRequestService {
-  final DatabaseReference _requestsRef =
-      FirebaseDatabase.instance.ref('rideRequests');
+  final DatabaseReference _requestsRef = FirebaseDatabase.instance.ref(
+    'rideRequests',
+  );
 
-  DatabaseReference requestRef(String requestId) => _requestsRef.child(requestId);
+  DatabaseReference requestRef(String requestId) =>
+      _requestsRef.child(requestId);
 
   Future<String> createRideRequest({
     required String riderId,
@@ -79,18 +81,16 @@ class RideRequestService {
 
   Future<void> cancelRequest(String requestId) async {
     debugPrint('RTDB: cancelRequest rideRequests/$requestId');
-    await requestRef(requestId).update({
-      'status': 'cancelled',
-      'updatedAt': ServerValue.timestamp,
-    });
+    await requestRef(
+      requestId,
+    ).update({'status': 'cancelled', 'updatedAt': ServerValue.timestamp});
   }
 
   Future<void> timeoutRequest(String requestId) async {
     debugPrint('RTDB: timeoutRequest rideRequests/$requestId');
-    await requestRef(requestId).update({
-      'status': 'timeout',
-      'updatedAt': ServerValue.timestamp,
-    });
+    await requestRef(
+      requestId,
+    ).update({'status': 'timeout', 'updatedAt': ServerValue.timestamp});
   }
 
   Stream<DatabaseEvent> watchRequest(String requestId) {

@@ -1,6 +1,7 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/constants.dart';
 import '../models/driver_location_model.dart';
@@ -36,6 +37,9 @@ class FirebaseLocationService {
   }
 
   Stream<DriverLocationModel?> watchDriverLocation(String driverId) {
+    if (FirebaseAuth.instance.currentUser == null) {
+      return const Stream<DriverLocationModel?>.empty();
+    }
     debugPrint('RTDB: watchDriverLocation drivers/$driverId');
     return driverRef(driverId).onValue.map((event) {
       final Object? data = event.snapshot.value;

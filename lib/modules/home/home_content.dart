@@ -198,6 +198,9 @@ class HomeContentController extends GetxController {
   }
 
   void _startDriverListener() {
+    if (FirebaseAuth.instance.currentUser == null) {
+      return;
+    }
     _driversSubscription?.cancel();
     _driversSubscription = _driversRef
         .orderByChild('isOnline')

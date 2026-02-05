@@ -26,11 +26,13 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   final LocationService _locationService = LocationService();
   final FirebaseLocationService _firebaseService = FirebaseLocationService();
   final RideRequestService _rideRequestService = RideRequestService();
-  final DatabaseReference _rideRequestsRef =
-      FirebaseDatabase.instance.ref('rideRequests');
+  final DatabaseReference _rideRequestsRef = FirebaseDatabase.instance.ref(
+    'rideRequests',
+  );
 
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription<DatabaseEvent>? _requestsSubscription;
+  StreamSubscription<User?>? _authSubscription;
   LatLng? _currentPosition;
   double _currentHeading = 0;
   bool _isOnline = false;
@@ -47,6 +49,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   void initState() {
     super.initState();
     _init();
+    _bindAuth();
   }
 
   Future<void> _init() async {
@@ -73,6 +76,24 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     });
   }
 
+  void _bindAuth() {
+    _authSubscription?.cancel();
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        _requestsSubscription?.cancel();
+        _requestsSubscription = null;
+        if (mounted) {
+          setState(() {
+            _nearbyRequests = [];
+            _allRequests = [];
+          });
+        }
+      } else if (_isOnline) {
+        _startRequestListener();
+      }
+    });
+  }
+
   Future<void> _goOnline() async {
     if (_driverId == null) return;
     final bool permissionOk = await _locationService.ensurePermission();
@@ -89,31 +110,33 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     });
 
     await _firebaseService.setDriverOnline(_driverId!, true);
-    _startRequestListener();
+    if (FirebaseAuth.instance.currentUser != null) {
+      _startRequestListener();
+    }
 
     _positionSubscription?.cancel();
-    _positionSubscription = _locationService.getPositionStream().listen(
-      (Position position) async {
-        final LatLng latLng = LatLng(position.latitude, position.longitude);
+    _positionSubscription = _locationService.getPositionStream().listen((
+      Position position,
+    ) async {
+      final LatLng latLng = LatLng(position.latitude, position.longitude);
 
-        if (mounted) {
-          setState(() {
-            _currentPosition = latLng;
-            _currentHeading = position.heading;
-          });
-        }
+      if (mounted) {
+        setState(() {
+          _currentPosition = latLng;
+          _currentHeading = position.heading;
+        });
+      }
 
-        _mapController.move(latLng, _mapController.camera.zoom);
+      _mapController.move(latLng, _mapController.camera.zoom);
 
-        await _firebaseService.updateDriverLocation(
-          driverId: _driverId!,
-          position: position,
-          isOnline: true,
-        );
+      await _firebaseService.updateDriverLocation(
+        driverId: _driverId!,
+        position: position,
+        isOnline: true,
+      );
 
-        _filterRequestsByDistance();
-      },
-    );
+      _filterRequestsByDistance();
+    });
   }
 
   Future<void> _goOffline() async {
@@ -244,6 +267,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   void dispose() {
     _positionSubscription?.cancel();
     _requestsSubscription?.cancel();
+    _authSubscription?.cancel();
     if (_isOnline && _driverId != null) {
       _firebaseService.setDriverOnline(_driverId!, false);
     }
@@ -255,9 +279,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     final LatLng mapCenter = _currentPosition ?? AppConstants.defaultMapCenter;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Driver Map'),
-      ),
+      appBar: AppBar(title: const Text('Driver Map')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -427,8 +449,9 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: Colors.grey[50],
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           border: Border.all(
                                             color: Colors.grey.shade300,
                                           ),
@@ -499,8 +522,8 @@ class _DriverMapScreenState extends State<DriverMapScreen>
             onPressed: _driverId == null
                 ? null
                 : _isOnline
-                    ? _goOffline
-                    : _goOnline,
+                ? _goOffline
+                : _goOnline,
             style: ElevatedButton.styleFrom(
               backgroundColor: _isOnline ? Colors.red : Colors.green,
               padding: const EdgeInsets.symmetric(vertical: 14),
