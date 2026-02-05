@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'rider_home_controller.dart';
+import '../../core/controllers/role_controller.dart';
 
 class RiderHomeScreen extends StatelessWidget {
   const RiderHomeScreen({super.key});
@@ -17,14 +19,20 @@ class RiderHomeScreen extends StatelessWidget {
       body: Stack(
         children: [
           // Background Map
-          const GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: LatLng(12.9716, 77.5946),
-              zoom: 14,
+          FlutterMap(
+            options: MapOptions(
+              initialCenter: const LatLng(12.9716, 77.5946),
+              initialZoom: 14,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
             ),
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.rapido.ui',
+              ),
+            ],
           ),
 
           // Top Earnings Card
@@ -332,7 +340,9 @@ class RiderHomeScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text("Logout", style: TextStyle(color: Colors.red)),
-            onTap: () {
+            onTap: () async {
+              final roleController = Get.find<RoleController>();
+              await roleController.signOut();
               Get.offAllNamed('/login');
             },
           ),

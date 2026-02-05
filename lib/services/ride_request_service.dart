@@ -46,6 +46,46 @@ class RideRequestService {
     });
   }
 
+  Future<bool> acceptRequest({
+    required String requestId,
+    required String driverId,
+  }) async {
+    final result = await requestRef(requestId).runTransaction((current) {
+      if (current == null) return Transaction.abort();
+      if (current is! Map) return Transaction.abort();
+      final Map data = Map.from(current as Map);
+      if (data['status'] != 'searching') {
+        return Transaction.abort();
+      }
+      data['status'] = 'accepted';
+      data['assignedDriverId'] = driverId;
+      data['updatedAt'] = ServerValue.timestamp;
+      return Transaction.success(data);
+    });
+    return result.committed;
+  }
+
+  Future<void> rejectRequest({
+    required String requestId,
+    required String driverId,
+  }) async {
+    await requestRef(requestId).child('rejectedBy/$driverId').set(true);
+  }
+
+  Future<void> cancelRequest(String requestId) async {
+    await requestRef(requestId).update({
+      'status': 'cancelled',
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> timeoutRequest(String requestId) async {
+    await requestRef(requestId).update({
+      'status': 'timeout',
+      'updatedAt': ServerValue.timestamp,
+    });
+  }
+
   Stream<DatabaseEvent> watchRequest(String requestId) {
     return requestRef(requestId).onValue;
   }

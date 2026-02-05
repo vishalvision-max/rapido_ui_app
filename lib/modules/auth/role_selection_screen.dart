@@ -51,8 +51,8 @@ class RoleSelectionScreen extends StatelessWidget {
                   description: "I want to book a ride or send packages",
                   icon: Icons.directions_bike_rounded,
                   color: AppColors.primaryYellow,
-                  onTap: () {
-                    roleController.setRole(UserRole.customer);
+                  onTap: () async {
+                    await roleController.setRole(UserRole.customer);
                     Get.offAllNamed('/home');
                   },
                 ),
@@ -65,8 +65,8 @@ class RoleSelectionScreen extends StatelessWidget {
                   description: "I want to earn by giving rides to others",
                   icon: Icons.sports_motorsports_rounded,
                   color: Colors.blue[700]!,
-                  onTap: () {
-                    roleController.setRole(UserRole.rider);
+                  onTap: () async {
+                    await roleController.setRole(UserRole.rider);
                     Get.offAllNamed('/rider-home');
                   },
                 ),

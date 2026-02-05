@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/colors.dart';
+import '../../core/controllers/role_controller.dart';
 
 class OtpController extends GetxController {
   final List<TextEditingController> otpControllers = List.generate(
@@ -12,11 +14,17 @@ class OtpController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxInt resendTimer = 30.obs;
   late String phoneNumber;
+  late String verificationId;
+  int? resendToken;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   @override
   void onInit() {
     super.onInit();
-    phoneNumber = Get.arguments ?? '+91 9876543210';
+    final args = (Get.arguments ?? <String, dynamic>{}) as Map<String, dynamic>;
+    phoneNumber = (args['phone'] ?? '+91').toString();
+    verificationId = (args['verificationId'] ?? '').toString();
+    resendToken = args['resendToken'] as int?;
     startResendTimer();
   }
 
@@ -32,12 +40,82 @@ class OtpController extends GetxController {
     });
   }
 
-  void verifyOtp() {
+  Future<void> verifyOtp() async {
+    final String code = otpControllers.map((c) => c.text).join();
+    if (code.length != 6) {
+      Get.snackbar(
+        'Invalid OTP',
+        'Please enter the 6-digit code',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+      return;
+    }
     isLoading.value = true;
-    Future.delayed(const Duration(seconds: 2), () {
+    try {
+      final credential = PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: code,
+      );
+      await _auth.signInWithCredential(credential);
+      final roleController = Get.find<RoleController>();
+      await roleController.ensureUserRecord();
+      final role = await roleController.fetchRole();
+      if (role == null) {
+        Get.offAllNamed('/role-selection');
+      } else if (roleController.isRider) {
+        Get.offAllNamed('/rider-home');
+      } else {
+        Get.offAllNamed('/home');
+      }
+    } on FirebaseAuthException catch (e) {
+      Get.snackbar(
+        'Verification Failed',
+        e.message ?? 'Invalid OTP',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+    } finally {
       isLoading.value = false;
-      Get.offAllNamed('/role-selection');
-    });
+    }
+  }
+
+  Future<void> resendOtp() async {
+    if (resendTimer.value > 0) return;
+    await _auth.verifyPhoneNumber(
+      phoneNumber: phoneNumber,
+      timeout: const Duration(seconds: 60),
+      forceResendingToken: resendToken,
+      verificationCompleted: (PhoneAuthCredential credential) async {
+      await _auth.signInWithCredential(credential);
+      final roleController = Get.find<RoleController>();
+      await roleController.ensureUserRecord();
+      final role = await roleController.fetchRole();
+      if (role == null) {
+        Get.offAllNamed('/role-selection');
+        } else if (roleController.isRider) {
+          Get.offAllNamed('/rider-home');
+        } else {
+          Get.offAllNamed('/home');
+        }
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        Get.snackbar(
+          'OTP Failed',
+          e.message ?? 'Unable to resend OTP',
+          backgroundColor: AppColors.error,
+          colorText: Colors.white,
+        );
+      },
+      codeSent: (String verificationId, int? token) {
+        this.verificationId = verificationId;
+        resendToken = token;
+        startResendTimer();
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {
+        this.verificationId = verificationId;
+      },
+    );
   }
 }
 
@@ -105,7 +183,7 @@ class OtpScreen extends StatelessWidget {
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           )
                         : TextButton(
-                            onPressed: controller.startResendTimer,
+                            onPressed: controller.resendOtp,
                             child: const Text(
                               'Resend Code',
                               style: TextStyle(

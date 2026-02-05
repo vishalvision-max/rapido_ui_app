@@ -11,6 +11,7 @@ import 'refer_earn_screen.dart';
 import 'support_screen.dart';
 import 'about_screen.dart';
 import '../payment/payment_methods_screen.dart';
+import '../../core/controllers/role_controller.dart';
 
 /// Main navigation controller
 class MainNavigationController extends GetxController {
@@ -172,7 +173,11 @@ class HomeScreen extends StatelessWidget {
           _buildDrawerItem(
             Icons.logout,
             'Logout',
-            () {},
+            () async {
+              final roleController = Get.find<RoleController>();
+              await roleController.signOut();
+              Get.offAllNamed('/login');
+            },
             color: AppColors.error,
           ),
           const SizedBox(height: 20),

@@ -1,9 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../../core/colors.dart';
 import '../../core/models/ride.dart';
+import '../../core/constants.dart';
+import '../../services/route_service.dart';
 import 'chat_screen.dart';
 
 class RideDetailsController extends GetxController
@@ -14,115 +20,149 @@ class RideDetailsController extends GetxController
   late double fare;
   late Rider rider;
   final RxString rideStatus = 'accepted'.obs;
+  late LatLng pickupLatLng;
+  late LatLng dropLatLng;
+  String? requestId;
+  String? driverId;
 
-  GoogleMapController? mapController;
-  final RxSet<Marker> markers = <Marker>{}.obs;
-  final RxSet<Polyline> polylines = <Polyline>{}.obs;
+  final MapController mapController = MapController();
+  final RxList<Marker> markers = <Marker>[].obs;
+  final RxList<LatLng> routePoints = <LatLng>[].obs;
   final RxBool showGuardianAlert = false.obs;
   final RxBool isSafe = true.obs;
 
-  late AnimationController moveController;
-  late Animation<LatLng> markerPositionAnimation;
-
-  final LatLng startPos = const LatLng(12.9716, 77.5946);
-  final LatLng endPos = const LatLng(12.9616, 77.5846);
+  StreamSubscription<DatabaseEvent>? _requestSub;
+  StreamSubscription<DatabaseEvent>? _driverSub;
+  final DatabaseReference _requestsRef =
+      FirebaseDatabase.instance.ref('rideRequests');
+  final DatabaseReference _driversRef =
+      FirebaseDatabase.instance.ref(AppConstants.driversPath);
+  final RouteService _routeService = RouteService();
+  LatLng? _driverPosition;
 
   @override
   void onInit() {
     super.onInit();
-    final args = Get.arguments as Map<String, dynamic>;
-    pickup = args['pickup'] ?? 'Current Location';
-    drop = args['drop'] ?? '';
-    rideType = args['rideType'] ?? 'bike';
-    fare = args['fare'] ?? 0.0;
+    final args = (Get.arguments ?? <String, dynamic>{}) as Map<String, dynamic>;
+    pickup = (args['pickup'] ?? 'Current Location').toString();
+    drop = (args['drop'] ?? '').toString();
+    rideType = (args['rideType'] ?? 'bike').toString();
+    fare = (args['fare'] ?? 0.0).toDouble();
+    pickupLatLng = LatLng(
+      (args['pickupLat'] ?? 0.0).toDouble(),
+      (args['pickupLng'] ?? 0.0).toDouble(),
+    );
+    dropLatLng = LatLng(
+      (args['dropLat'] ?? 0.0).toDouble(),
+      (args['dropLng'] ?? 0.0).toDouble(),
+    );
+    requestId = args['requestId']?.toString();
+    driverId = args['driverId']?.toString();
     rider = Rider.getDummyRider();
 
-    moveController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 15),
-    );
-    markerPositionAnimation = Tween<LatLng>(
-      begin: startPos,
-      end: endPos,
-    ).animate(moveController);
-
-    moveController.addListener(() {
-      _updateMarkerPosition(markerPositionAnimation.value);
-    });
-
-    _drawRoute();
-    _simulateRideProgress();
+    _updateMarkers();
+    _watchRideRequest();
+    _watchDriverLocation();
+    _buildRoute();
   }
 
-  void onMapCreated(GoogleMapController controller) {
-    mapController = controller;
-    moveController.forward();
-  }
-
-  void _drawRoute() {
-    polylines.add(
-      Polyline(
-        polylineId: const PolylineId('route'),
-        points: [startPos, endPos],
-        color: AppColors.primaryYellow,
-        width: 5,
-        jointType: JointType.round,
-        patterns: [PatternItem.dot, PatternItem.gap(10)],
-      ),
-    );
-
-    _updateMarkerPosition(startPos);
-  }
-
-  void _updateMarkerPosition(LatLng pos) {
-    markers.assignAll({
-      Marker(
-        markerId: const MarkerId('rider'),
-        position: pos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
-        infoWindow: const InfoWindow(title: 'Your Captain'),
-        rotation: 45, // Simulating a heading
-      ),
-      Marker(
-        markerId: const MarkerId('destination'),
-        position: endPos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ),
-    });
-  }
-
-  void _simulateRideProgress() {
-    Future.delayed(
-      const Duration(seconds: 5),
-      () => rideStatus.value = 'ongoing',
-    );
-    Future.delayed(const Duration(seconds: 15), () {
-      if (isSafe.value) {
-        // Only finish if user says they are safe
-        rideStatus.value = 'completed';
-        Get.offNamed(
-          '/payment',
-          arguments: {'fare': fare, 'pickup': pickup, 'drop': drop},
-        );
+  void _watchRideRequest() {
+    if (requestId == null) return;
+    _requestSub = _requestsRef.child(requestId!).onValue.listen((event) {
+      final Object? data = event.snapshot.value;
+      if (data is Map<dynamic, dynamic>) {
+        final String status = (data['status'] ?? '').toString();
+        if (status.isNotEmpty) {
+          rideStatus.value = status;
+        }
+        if (status == 'completed') {
+          Get.offNamed(
+            '/payment',
+            arguments: {'fare': fare, 'pickup': pickup, 'drop': drop},
+          );
+        }
       }
     });
+  }
 
-    // Simulate Route Deviation for Guardian Angel after 7 seconds
-    Future.delayed(const Duration(seconds: 7), () {
-      if (rideStatus.value == 'ongoing') {
-        showGuardianAlert.value = true;
-        // Shift marker away from route to simulate deviation
-        _updateMarkerPosition(const LatLng(12.9650, 77.6000));
+  void _watchDriverLocation() {
+    if (driverId == null) return;
+    _driverSub =
+        _driversRef.child(driverId!).onValue.listen((DatabaseEvent event) {
+      final Object? data = event.snapshot.value;
+      if (data is Map<dynamic, dynamic>) {
+        final double lat = (data['lat'] ?? 0).toDouble();
+        final double lng = (data['lng'] ?? 0).toDouble();
+        _driverPosition = LatLng(lat, lng);
+        _updateMarkers();
+        _buildRoute();
       }
     });
+  }
+
+  Future<void> _buildRoute() async {
+    final LatLng start = _driverPosition ?? pickupLatLng;
+    final List<LatLng> points =
+        await _routeService.fetchRoute(start: start, end: dropLatLng);
+    routePoints.assignAll(points);
+    if (points.isNotEmpty) {
+      _fitRouteBounds(points);
+    }
+  }
+
+  void _fitRouteBounds(List<LatLng> points) {
+    final bounds = LatLngBounds.fromPoints(points);
+    mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.all(60),
+      ),
+    );
+  }
+
+  void _updateMarkers() {
+    final List<Marker> next = [
+      Marker(
+        point: pickupLatLng,
+        width: 42,
+        height: 42,
+        child: const Icon(
+          Icons.my_location,
+          color: AppColors.success,
+          size: 28,
+        ),
+      ),
+      Marker(
+        point: dropLatLng,
+        width: 42,
+        height: 42,
+        child: const Icon(
+          Icons.location_on,
+          color: AppColors.error,
+          size: 30,
+        ),
+      ),
+    ];
+    if (_driverPosition != null) {
+      next.add(
+        Marker(
+          point: _driverPosition!,
+          width: 42,
+          height: 42,
+          child: const Icon(
+            Icons.navigation,
+            color: Colors.green,
+            size: 28,
+          ),
+        ),
+      );
+    }
+    markers.assignAll(next);
   }
 
   void confirmSafety() {
     showGuardianAlert.value = false;
     isSafe.value = true;
-    _updateMarkerPosition(
-      markerPositionAnimation.value,
-    ); // Snap back to route for simulation
     Get.snackbar(
       'Guardian Angel',
       'Glad you are safe! We are continuing to monitor your ride.',
@@ -134,7 +174,8 @@ class RideDetailsController extends GetxController
 
   @override
   void onClose() {
-    moveController.dispose();
+    _requestSub?.cancel();
+    _driverSub?.cancel();
     super.onClose();
   }
 
@@ -174,16 +215,33 @@ class RideDetailsScreen extends StatelessWidget {
           // 1. Map Background
           Positioned.fill(
             child: Obx(
-              () => GoogleMap(
-                onMapCreated: controller.onMapCreated,
-                initialCameraPosition: const CameraPosition(
-                  target: LatLng(12.9716, 77.5946),
-                  zoom: 15,
+              () => FlutterMap(
+                mapController: controller.mapController,
+                options: MapOptions(
+                  initialCenter: controller.pickupLatLng,
+                  initialZoom: 15,
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all,
+                  ),
                 ),
-                myLocationEnabled: true,
-                markers: controller.markers.toSet(),
-                polylines: controller.polylines.toSet(),
-                zoomControlsEnabled: false,
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.rapido.ui',
+                  ),
+                  if (controller.routePoints.isNotEmpty)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: controller.routePoints,
+                          strokeWidth: 5,
+                          color: Colors.blue,
+                        ),
+                      ],
+                    ),
+                  MarkerLayer(markers: controller.markers),
+                ],
               ),
             ),
           ),

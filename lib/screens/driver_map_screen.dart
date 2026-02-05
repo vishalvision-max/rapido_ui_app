@@ -39,6 +39,8 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   String? _driverId;
   List<_RideRequest> _allRequests = [];
   List<_RideRequest> _nearbyRequests = [];
+  _RideRequest? _activeRequest;
+  String _activeStatus = 'accepted';
   static const double _nearbyRadiusMeters = 3000;
 
   @override
@@ -140,6 +142,11 @@ class _DriverMapScreenState extends State<DriverMapScreen>
           if (value is Map<dynamic, dynamic>) {
             final String status = (value['status'] ?? '').toString();
             if (status != 'searching') return;
+            final Map<dynamic, dynamic>? rejectedBy =
+                value['rejectedBy'] as Map<dynamic, dynamic>?;
+            if (rejectedBy != null && _driverId != null) {
+              if (rejectedBy[_driverId] == true) return;
+            }
             final double pickupLat = (value['pickupLat'] ?? 0).toDouble();
             final double pickupLng = (value['pickupLng'] ?? 0).toDouble();
             final double dropLat = (value['dropLat'] ?? 0).toDouble();
@@ -185,11 +192,52 @@ class _DriverMapScreenState extends State<DriverMapScreen>
 
   Future<void> _acceptRequest(_RideRequest request) async {
     if (_driverId == null) return;
-    await _rideRequestService.updateStatus(
+    final bool ok = await _rideRequestService.acceptRequest(
       requestId: request.id,
-      status: 'accepted',
-      assignedDriverId: _driverId!,
+      driverId: _driverId!,
     );
+    if (ok) {
+      setState(() {
+        _activeRequest = request;
+        _activeStatus = 'accepted';
+      });
+    }
+  }
+
+  Future<void> _rejectRequest(_RideRequest request) async {
+    if (_driverId == null) return;
+    await _rideRequestService.rejectRequest(
+      requestId: request.id,
+      driverId: _driverId!,
+    );
+    setState(() {
+      _nearbyRequests.removeWhere((r) => r.id == request.id);
+    });
+  }
+
+  Future<void> _startRide() async {
+    if (_activeRequest == null) return;
+    await _rideRequestService.updateStatus(
+      requestId: _activeRequest!.id,
+      status: 'ongoing',
+      assignedDriverId: _driverId,
+    );
+    setState(() {
+      _activeStatus = 'ongoing';
+    });
+  }
+
+  Future<void> _completeRide() async {
+    if (_activeRequest == null) return;
+    await _rideRequestService.updateStatus(
+      requestId: _activeRequest!.id,
+      status: 'completed',
+      assignedDriverId: _driverId,
+    );
+    setState(() {
+      _activeStatus = 'completed';
+      _activeRequest = null;
+    });
   }
 
   @override
@@ -274,7 +322,71 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                             ),
                         ],
                       ),
-                      if (_isOnline && _nearbyRequests.isNotEmpty)
+                      if (_isOnline && _activeRequest != null)
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black12,
+                                  blurRadius: 12,
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Active Ride',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _activeRequest!.pickupText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  _activeRequest!.dropText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.black54),
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Text(
+                                      '₹${_activeRequest!.fare.toStringAsFixed(0)}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    if (_activeStatus == 'accepted')
+                                      ElevatedButton(
+                                        onPressed: _startRide,
+                                        child: const Text('Start'),
+                                      ),
+                                    if (_activeStatus == 'ongoing')
+                                      ElevatedButton(
+                                        onPressed: _completeRide,
+                                        child: const Text('Complete'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (_isOnline &&
+                          _activeRequest == null &&
+                          _nearbyRequests.isNotEmpty)
                         Positioned(
                           left: 12,
                           right: 12,
@@ -356,6 +468,12 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                                   onPressed: () =>
                                                       _acceptRequest(req),
                                                   child: const Text('Accept'),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                OutlinedButton(
+                                                  onPressed: () =>
+                                                      _rejectRequest(req),
+                                                  child: const Text('Ignore'),
                                                 ),
                                               ],
                                             ),

@@ -1,28 +1,96 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/colors.dart';
+import '../../core/controllers/role_controller.dart';
 
 class LoginController extends GetxController {
   final TextEditingController phoneController = TextEditingController();
   final RxBool isLoading = false.obs;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  void sendOtp() {
-    if (phoneController.text.length < 10) {
+  final Rx<CountryCode> selectedCountry =
+      CountryCode(name: 'India', dialCode: '+91', flag: '🇮🇳').obs;
+
+  final List<CountryCode> countries = const [
+    CountryCode(name: 'India', dialCode: '+91', flag: '🇮🇳'),
+    CountryCode(name: 'United States', dialCode: '+1', flag: '🇺🇸'),
+    CountryCode(name: 'United Kingdom', dialCode: '+44', flag: '🇬🇧'),
+    CountryCode(name: 'UAE', dialCode: '+971', flag: '🇦🇪'),
+    CountryCode(name: 'Canada', dialCode: '+1', flag: '🇨🇦'),
+    CountryCode(name: 'Singapore', dialCode: '+65', flag: '🇸🇬'),
+  ];
+
+  Future<void> sendOtp() async {
+    final String raw = phoneController.text.trim();
+    if (raw.length < 7) {
       Get.snackbar(
         'Invalid Phone',
-        'Please enter a 10-digit phone number',
+        'Please enter a valid phone number',
         backgroundColor: AppColors.error,
         colorText: Colors.white,
       );
       return;
     }
+
+    final String number = raw.replaceAll(RegExp(r'\\s+'), '');
+    final String fullPhone =
+        '${selectedCountry.value.dialCode}$number';
+
     isLoading.value = true;
-    Future.delayed(const Duration(seconds: 2), () {
-      isLoading.value = false;
-      Get.toNamed('/otp', arguments: phoneController.text);
-    });
+    await _auth.verifyPhoneNumber(
+      phoneNumber: fullPhone,
+      timeout: const Duration(seconds: 60),
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        await _auth.signInWithCredential(credential);
+        isLoading.value = false;
+        final roleController = Get.find<RoleController>();
+        await roleController.ensureUserRecord();
+        final role = await roleController.fetchRole();
+        if (role == null) {
+          Get.offAllNamed('/role-selection');
+        } else if (roleController.isRider) {
+          Get.offAllNamed('/rider-home');
+        } else {
+          Get.offAllNamed('/home');
+        }
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        isLoading.value = false;
+        Get.snackbar(
+          'Verification Failed',
+          e.message ?? 'Unable to send OTP',
+          backgroundColor: AppColors.error,
+          colorText: Colors.white,
+        );
+      },
+      codeSent: (String verificationId, int? resendToken) {
+        isLoading.value = false;
+        Get.toNamed(
+          '/otp',
+          arguments: {
+            'phone': fullPhone,
+            'verificationId': verificationId,
+            'resendToken': resendToken,
+          },
+        );
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {},
+    );
   }
+}
+
+class CountryCode {
+  final String name;
+  final String dialCode;
+  final String flag;
+
+  const CountryCode({
+    required this.name,
+    required this.dialCode,
+    required this.flag,
+  });
 }
 
 class LoginScreen extends StatelessWidget {
@@ -85,11 +153,22 @@ class LoginScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      const Text(
-                        '🇮🇳 +91',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                      Obx(
+                        () => GestureDetector(
+                          onTap: () => _showCountryPicker(context, controller),
+                          child: Row(
+                            children: [
+                              Text(
+                                '${controller.selectedCountry.value.flag} ${controller.selectedCountry.value.dialCode}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.arrow_drop_down),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -203,6 +282,30 @@ class LoginScreen extends StatelessWidget {
         border: Border.all(color: Colors.grey[300]!),
       ),
       child: Icon(icon, size: 30, color: color),
+    );
+  }
+
+  void _showCountryPicker(BuildContext context, LoginController controller) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => ListView.separated(
+        itemCount: controller.countries.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final item = controller.countries[index];
+          return ListTile(
+            title: Text('${item.flag} ${item.name}'),
+            trailing: Text(item.dialCode),
+            onTap: () {
+              controller.selectedCountry.value = item;
+              Get.back();
+            },
+          );
+        },
+      ),
     );
   }
 }

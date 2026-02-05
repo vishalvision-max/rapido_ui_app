@@ -1,17 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/colors.dart';
+import '../../core/controllers/role_controller.dart';
 
 class SplashController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _navigateToLogin();
+    _bootstrap();
   }
 
-  void _navigateToLogin() {
-    Future.delayed(const Duration(seconds: 3), () => Get.offNamed('/login'));
+  Future<void> _bootstrap() async {
+    await Future.delayed(const Duration(seconds: 2));
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      Get.offNamed('/login');
+      return;
+    }
+
+    final roleController = Get.find<RoleController>();
+    final role = await roleController.fetchRole();
+    if (role == null) {
+      Get.offNamed('/role-selection');
+      return;
+    }
+    if (roleController.isRider) {
+      Get.offNamed('/rider-home');
+    } else {
+      Get.offNamed('/home');
+    }
   }
 }
 

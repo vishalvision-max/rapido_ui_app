@@ -32,6 +32,7 @@ class SearchingRiderController extends GetxController
   StreamSubscription<DatabaseEvent>? _requestSub;
   String? _requestId;
   static const double _nearbyRadiusMeters = 3000;
+  Timer? _searchTimeout;
 
   @override
   void onInit() {
@@ -59,6 +60,7 @@ class SearchingRiderController extends GetxController
     _createRideRequest();
     _startDriverListener();
     _updateMarkers();
+    _startSearchTimeout();
   }
 
   Future<void> _createRideRequest() async {
@@ -79,6 +81,7 @@ class SearchingRiderController extends GetxController
       if (data is Map<dynamic, dynamic>) {
         final String status = (data['status'] ?? '').toString();
         if (status == 'accepted') {
+          _searchTimeout?.cancel();
           final String driverId =
               (data['assignedDriverId'] ?? '').toString();
           Get.offNamed(
@@ -88,12 +91,34 @@ class SearchingRiderController extends GetxController
               'drop': drop,
               'rideType': rideType,
               'fare': fare,
+              'pickupLat': pickupLatLng.latitude,
+              'pickupLng': pickupLatLng.longitude,
+              'dropLat': dropLatLng.latitude,
+              'dropLng': dropLatLng.longitude,
               'requestId': _requestId,
               'driverId': driverId,
             },
           );
+        } else if (status == 'cancelled' || status == 'timeout') {
+          _searchTimeout?.cancel();
+          Get.back();
         }
       }
+    });
+  }
+
+  void _startSearchTimeout() {
+    _searchTimeout?.cancel();
+    _searchTimeout = Timer(const Duration(seconds: 45), () async {
+      if (_requestId == null) return;
+      await _rideRequestService.timeoutRequest(_requestId!);
+      Get.snackbar(
+        'No captains found',
+        'Please try again',
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+      Get.back();
     });
   }
 
@@ -175,6 +200,7 @@ class SearchingRiderController extends GetxController
     pulseController.dispose();
     _driversSub?.cancel();
     _requestSub?.cancel();
+    _searchTimeout?.cancel();
     super.onClose();
   }
 }
@@ -350,7 +376,13 @@ class SearchingRiderScreen extends StatelessWidget {
                     width: double.infinity,
                     height: 54,
                     child: TextButton(
-                      onPressed: () => Get.back(),
+                      onPressed: () async {
+                        if (controller._requestId != null) {
+                          await controller._rideRequestService
+                              .cancelRequest(controller._requestId!);
+                        }
+                        Get.back();
+                      },
                       child: const Text(
                         'Cancel Ride',
                         style: TextStyle(
