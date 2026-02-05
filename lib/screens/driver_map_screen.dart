@@ -39,7 +39,6 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   bool _permissionOk = false;
   bool _loading = true;
   String? _driverId;
-  bool _autoOnlineDone = false;
   List<_RideRequest> _allRequests = [];
   List<_RideRequest> _nearbyRequests = [];
   _RideRequest? _activeRequest;
@@ -75,11 +74,6 @@ class _DriverMapScreenState extends State<DriverMapScreen>
           : LatLng(current.latitude, current.longitude);
       _loading = false;
     });
-
-    if (permissionOk && _driverId != null && !_autoOnlineDone) {
-      _autoOnlineDone = true;
-      await _goOnline();
-    }
   }
 
   void _bindAuth() {
@@ -202,7 +196,16 @@ class _DriverMapScreenState extends State<DriverMapScreen>
 
   void _filterRequestsByDistance() {
     if (_currentPosition == null) return;
-    final List<_RideRequest> filtered = List<_RideRequest>.from(_allRequests);
+    final LatLng me = _currentPosition!;
+    final List<_RideRequest> filtered = _allRequests.where((req) {
+      final double distance = Geolocator.distanceBetween(
+        me.latitude,
+        me.longitude,
+        req.pickup.latitude,
+        req.pickup.longitude,
+      );
+      return distance <= _nearbyRadiusMeters;
+    }).toList();
     if (mounted) {
       setState(() {
         _nearbyRequests = filtered;
@@ -244,6 +247,18 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     );
     setState(() {
       _activeStatus = 'ongoing';
+    });
+  }
+
+  Future<void> _arrivedAtPickup() async {
+    if (_activeRequest == null) return;
+    await _rideRequestService.updateStatus(
+      requestId: _activeRequest!.id,
+      status: 'arrived',
+      assignedDriverId: _driverId,
+    );
+    setState(() {
+      _activeStatus = 'arrived';
     });
   }
 
@@ -389,6 +404,11 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                     const Spacer(),
                                     if (_activeStatus == 'accepted')
                                       ElevatedButton(
+                                        onPressed: _arrivedAtPickup,
+                                        child: const Text('Arrived'),
+                                      ),
+                                    if (_activeStatus == 'arrived')
+                                      ElevatedButton(
                                         onPressed: _startRide,
                                         child: const Text('Start'),
                                       ),
@@ -442,7 +462,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                     itemBuilder: (context, index) {
                                       final req = _nearbyRequests[index];
                                       return Container(
-                                        width: 220,
+                                        width: 310,
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: Colors.grey[50],
@@ -481,19 +501,60 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                                   '₹${req.fare.toStringAsFixed(0)}',
                                                   style: const TextStyle(
                                                     fontWeight: FontWeight.bold,
+                                                    fontSize: 12,
                                                   ),
                                                 ),
                                                 const Spacer(),
-                                                ElevatedButton(
-                                                  onPressed: () =>
-                                                      _acceptRequest(req),
-                                                  child: const Text('Accept'),
+                                                SizedBox(
+                                                  width: 80,
+                                                  height: 26,
+                                                  child: ElevatedButton(
+                                                    onPressed: () =>
+                                                        _acceptRequest(req),
+                                                    style: ElevatedButton.styleFrom(
+                                                      padding: EdgeInsets.zero,
+                                                      minimumSize: const Size(
+                                                        80,
+                                                        26,
+                                                      ),
+                                                      tapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                    ),
+                                                    child: const Text(
+                                                      'Accept',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
                                                 const SizedBox(width: 6),
-                                                OutlinedButton(
-                                                  onPressed: () =>
-                                                      _rejectRequest(req),
-                                                  child: const Text('Ignore'),
+                                                SizedBox(
+                                                  height: 26,
+                                                  child: OutlinedButton(
+                                                    onPressed: () =>
+                                                        _rejectRequest(req),
+                                                    style: OutlinedButton.styleFrom(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                          ),
+                                                      minimumSize: const Size(
+                                                        60,
+                                                        26,
+                                                      ),
+                                                      tapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                    ),
+                                                    child: const Text(
+                                                      'Ignore',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
                                               ],
                                             ),

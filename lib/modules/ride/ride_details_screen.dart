@@ -74,6 +74,7 @@ class RideDetailsController extends GetxController
         final String status = (data['status'] ?? '').toString();
         if (status.isNotEmpty) {
           rideStatus.value = status;
+          _buildRoute();
         }
         if (status == 'completed') {
           Get.offNamed(
@@ -101,9 +102,13 @@ class RideDetailsController extends GetxController
   }
 
   Future<void> _buildRoute() async {
+    final String status = rideStatus.value;
+    final bool goingToPickup =
+        status == 'accepted' || status == 'arriving' || status == 'arrived';
     final LatLng start = _driverPosition ?? pickupLatLng;
+    final LatLng end = goingToPickup ? pickupLatLng : dropLatLng;
     final List<LatLng> points =
-        await _routeService.fetchRoute(start: start, end: dropLatLng);
+        await _routeService.fetchRoute(start: start, end: end);
     routePoints.assignAll(points);
     if (points.isNotEmpty) {
       _fitRouteBounds(points);
@@ -193,6 +198,8 @@ class RideDetailsController extends GetxController
         return 'Captain Accepted';
       case 'arriving':
         return 'Captain Arriving';
+      case 'arrived':
+        return 'Captain Arrived';
       case 'ongoing':
         return 'On the way';
       default:
