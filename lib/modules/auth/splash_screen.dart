@@ -27,7 +27,7 @@ class SplashController extends GetxController {
       return;
     }
     if (roleController.isRider) {
-      Get.offNamed('/rider-home');
+      Get.offNamed('/driver-map');
     } else {
       Get.offNamed('/home');
     }

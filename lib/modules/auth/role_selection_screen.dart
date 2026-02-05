@@ -67,7 +67,7 @@ class RoleSelectionScreen extends StatelessWidget {
                   color: Colors.blue[700]!,
                   onTap: () async {
                     await roleController.setRole(UserRole.rider);
-                    Get.offAllNamed('/rider-home');
+                    Get.offAllNamed('/driver-map');
                   },
                 ),
               ),

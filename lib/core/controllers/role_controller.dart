@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:firebase_database/firebase_database.dart';
+import 'package:uuid/uuid.dart';
 import '../models/user.dart';
 
 class RoleController extends GetxController {
   final Rx<UserRole> currentRole = UserRole.customer.obs;
+  final Uuid _uuid = const Uuid();
 
   final DatabaseReference _usersRef = FirebaseDatabase.instance.ref().child(
     'users',
@@ -35,9 +37,22 @@ class RoleController extends GetxController {
       debugPrint('ensureUserRecord: FIXING USER NODE');
 
       await userRef.set({
+        'appUid': _uuid.v4(),
         'phone': user.phoneNumber,
+        'email': user.email,
         'role': null,
         'createdAt': ServerValue.timestamp,
+      });
+      return;
+    }
+
+    final Map<String, dynamic> data = Map<String, dynamic>.from(
+      snap.value as Map,
+    );
+    if ((data['appUid'] ?? '').toString().isEmpty) {
+      await userRef.update({
+        'appUid': _uuid.v4(),
+        'updatedAt': ServerValue.timestamp,
       });
     }
   }
@@ -66,7 +81,9 @@ class RoleController extends GetxController {
     if (snap.value is String) {
       debugPrint('fetchRole: VALUE IS STRING → RESETTING NODE');
       await _usersRef.child(uid).set({
+        'appUid': _uuid.v4(),
         'phone': fa.FirebaseAuth.instance.currentUser?.phoneNumber,
+        'email': fa.FirebaseAuth.instance.currentUser?.email,
         'role': "user",
         'createdAt': ServerValue.timestamp,
       });
