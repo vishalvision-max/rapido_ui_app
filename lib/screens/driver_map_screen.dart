@@ -11,6 +11,7 @@ import '../core/constants.dart';
 import '../services/firebase_location_service.dart';
 import '../services/location_service.dart';
 import '../services/ride_request_service.dart';
+import '../services/route_service.dart';
 import '../widgets/driver_marker.dart';
 
 class DriverMapScreen extends StatefulWidget {
@@ -26,6 +27,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   final LocationService _locationService = LocationService();
   final FirebaseLocationService _firebaseService = FirebaseLocationService();
   final RideRequestService _rideRequestService = RideRequestService();
+  final RouteService _routeService = RouteService();
   final DatabaseReference _rideRequestsRef = FirebaseDatabase.instance.ref(
     'rideRequests',
   );
@@ -43,6 +45,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
   List<_RideRequest> _nearbyRequests = [];
   _RideRequest? _activeRequest;
   String _activeStatus = 'accepted';
+  final List<LatLng> _routePoints = [];
   static const double _nearbyRadiusMeters = 3000;
 
   @override
@@ -136,6 +139,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
       );
 
       _filterRequestsByDistance();
+      _buildDriverRoute();
     });
   }
 
@@ -224,6 +228,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
         _activeRequest = request;
         _activeStatus = 'accepted';
       });
+      await _buildDriverRoute();
     }
   }
 
@@ -248,6 +253,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     setState(() {
       _activeStatus = 'ongoing';
     });
+    await _buildDriverRoute();
   }
 
   Future<void> _arrivedAtPickup() async {
@@ -260,6 +266,7 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     setState(() {
       _activeStatus = 'arrived';
     });
+    await _buildDriverRoute();
   }
 
   Future<void> _completeRide() async {
@@ -272,6 +279,25 @@ class _DriverMapScreenState extends State<DriverMapScreen>
     setState(() {
       _activeStatus = 'completed';
       _activeRequest = null;
+      _routePoints.clear();
+    });
+  }
+
+  Future<void> _buildDriverRoute() async {
+    if (_activeRequest == null) return;
+    if (_currentPosition == null) return;
+    final LatLng start = _currentPosition!;
+    final bool goingToPickup =
+        _activeStatus == 'accepted' || _activeStatus == 'arrived';
+    final LatLng end = goingToPickup
+        ? _activeRequest!.pickup
+        : _activeRequest!.drop;
+    final points = await _routeService.fetchRoute(start: start, end: end);
+    if (!mounted) return;
+    setState(() {
+      _routePoints
+        ..clear()
+        ..addAll(points);
     });
   }
 
@@ -339,6 +365,16 @@ class _DriverMapScreenState extends State<DriverMapScreen>
                                 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                             userAgentPackageName: 'com.rapido.ui',
                           ),
+                          if (_routePoints.isNotEmpty)
+                            PolylineLayer(
+                              polylines: [
+                                Polyline(
+                                  points: _routePoints,
+                                  strokeWidth: 5,
+                                  color: Colors.blue,
+                                ),
+                              ],
+                            ),
                           if (_currentPosition != null)
                             MarkerLayer(
                               markers: [
