@@ -24,19 +24,24 @@ class RideDetailsController extends GetxController
   late LatLng dropLatLng;
   String? requestId;
   String? driverId;
+  final RxBool isReady = false.obs;
 
   final MapController mapController = MapController();
   final RxList<Marker> markers = <Marker>[].obs;
   final RxList<LatLng> routePoints = <LatLng>[].obs;
   final RxBool showGuardianAlert = false.obs;
   final RxBool isSafe = true.obs;
+  final RxDouble distanceKm = 0.0.obs;
+  final RxString distanceLabel = ''.obs;
 
   StreamSubscription<DatabaseEvent>? _requestSub;
   StreamSubscription<DatabaseEvent>? _driverSub;
-  final DatabaseReference _requestsRef =
-      FirebaseDatabase.instance.ref('rideRequests');
-  final DatabaseReference _driversRef =
-      FirebaseDatabase.instance.ref(AppConstants.driversPath);
+  final DatabaseReference _requestsRef = FirebaseDatabase.instance.ref(
+    'rideRequests',
+  );
+  final DatabaseReference _driversRef = FirebaseDatabase.instance.ref(
+    AppConstants.driversPath,
+  );
   final RouteService _routeService = RouteService();
   LatLng? _driverPosition;
 
@@ -44,6 +49,7 @@ class RideDetailsController extends GetxController
   void onInit() {
     super.onInit();
     final args = (Get.arguments ?? <String, dynamic>{}) as Map<String, dynamic>;
+    debugPrint('RideDetails: args=$args');
     pickup = (args['pickup'] ?? 'Current Location').toString();
     drop = (args['drop'] ?? '').toString();
     rideType = (args['rideType'] ?? 'bike').toString();
@@ -58,7 +64,11 @@ class RideDetailsController extends GetxController
     );
     requestId = args['requestId']?.toString();
     driverId = args['driverId']?.toString();
+    debugPrint(
+      'RideDetails: pickupLatLng=$pickupLatLng dropLatLng=$dropLatLng requestId=$requestId driverId=$driverId rideType=$rideType fare=$fare',
+    );
     rider = Rider.getDummyRider();
+    isReady.value = true;
 
     _updateMarkers();
     _watchRideRequest();
@@ -70,15 +80,21 @@ class RideDetailsController extends GetxController
     if (requestId == null) return;
     _requestSub = _requestsRef.child(requestId!).onValue.listen((event) {
       final Object? data = event.snapshot.value;
+      debugPrint(
+        'RideDetails: rideRequest snapshot=${data.runtimeType} data=$data',
+      );
       if (data is Map<dynamic, dynamic>) {
         final String status = (data['status'] ?? '').toString();
         if (status.isNotEmpty) {
+          debugPrint(
+            'RideDetails: status=$status assignedDriverId=${data['assignedDriverId']}',
+          );
           rideStatus.value = status;
           _buildRoute();
+          _updateDistance();
         }
         if (driverId == null) {
-          final String assigned =
-              (data['assignedDriverId'] ?? '').toString();
+          final String assigned = (data['assignedDriverId'] ?? '').toString();
           if (assigned.isNotEmpty) {
             driverId = assigned;
             _watchDriverLocation();
@@ -96,15 +112,19 @@ class RideDetailsController extends GetxController
 
   void _watchDriverLocation() {
     if (driverId == null) return;
-    _driverSub =
-        _driversRef.child(driverId!).onValue.listen((DatabaseEvent event) {
+    _driverSub = _driversRef.child(driverId!).onValue.listen((
+      DatabaseEvent event,
+    ) {
       final Object? data = event.snapshot.value;
+      debugPrint('RideDetails: driver snapshot=${data.runtimeType} data=$data');
       if (data is Map<dynamic, dynamic>) {
         final double lat = (data['lat'] ?? 0).toDouble();
         final double lng = (data['lng'] ?? 0).toDouble();
         _driverPosition = LatLng(lat, lng);
+        debugPrint('RideDetails: driverPosition=$_driverPosition');
         _updateMarkers();
         _buildRoute();
+        _updateDistance();
       }
     });
   }
@@ -118,8 +138,12 @@ class RideDetailsController extends GetxController
       final LatLng end = goingToPickup ? pickupLatLng : dropLatLng;
       if (start.latitude == 0 && start.longitude == 0) return;
       if (end.latitude == 0 && end.longitude == 0) return;
-      final List<LatLng> points =
-          await _routeService.fetchRoute(start: start, end: end);
+      debugPrint('RideDetails: buildRoute from=$start to=$end status=$status');
+      final List<LatLng> points = await _routeService.fetchRoute(
+        start: start,
+        end: end,
+      );
+      debugPrint('RideDetails: routePoints=${points.length}');
       routePoints.assignAll(points);
       if (points.isNotEmpty) {
         _fitRouteBounds(points);
@@ -129,13 +153,34 @@ class RideDetailsController extends GetxController
     }
   }
 
+  void _updateDistance() {
+    if (_driverPosition == null) {
+      distanceKm.value = 0;
+      distanceLabel.value = '';
+      return;
+    }
+    final String status = rideStatus.value;
+    final bool goingToPickup =
+        status == 'accepted' || status == 'arriving' || status == 'arrived';
+    final LatLng target = goingToPickup ? pickupLatLng : dropLatLng;
+    final double meters = const Distance().as(
+      LengthUnit.Meter,
+      _driverPosition!,
+      target,
+    );
+    final double km = meters / 1000.0;
+    distanceKm.value = km;
+    if (km >= 1) {
+      distanceLabel.value = '${km.toStringAsFixed(1)} km away';
+    } else {
+      distanceLabel.value = '${meters.toStringAsFixed(0)} m away';
+    }
+  }
+
   void _fitRouteBounds(List<LatLng> points) {
     final bounds = LatLngBounds.fromPoints(points);
     mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.all(60),
-      ),
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)),
     );
   }
 
@@ -155,11 +200,7 @@ class RideDetailsController extends GetxController
         point: dropLatLng,
         width: 42,
         height: 42,
-        child: const Icon(
-          Icons.location_on,
-          color: AppColors.error,
-          size: 30,
-        ),
+        child: const Icon(Icons.location_on, color: AppColors.error, size: 30),
       ),
     ];
     if (_driverPosition != null) {
@@ -168,11 +209,7 @@ class RideDetailsController extends GetxController
           point: _driverPosition!,
           width: 42,
           height: 42,
-          child: const Icon(
-            Icons.navigation,
-            color: Colors.green,
-            size: 28,
-          ),
+          child: const Icon(Icons.navigation, color: Colors.green, size: 28),
         ),
       );
     }
@@ -229,397 +266,453 @@ class RideDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(RideDetailsController());
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // 1. Map Background
-          Positioned.fill(
-            child: Obx(
-              () => FlutterMap(
-                mapController: controller.mapController,
-                options: MapOptions(
-                  initialCenter: controller.pickupLatLng,
-                  initialZoom: 15,
-                  interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.all,
-                  ),
-                ),
-                children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.rapido.ui',
-                  ),
-                  if (controller.routePoints.isNotEmpty)
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: controller.routePoints,
-                          strokeWidth: 5,
-                          color: Colors.blue,
-                        ),
-                      ],
+    return Obx(() {
+      if (!controller.isReady.value) {
+        return const Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(child: CircularProgressIndicator()),
+        );
+      }
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: Stack(
+          children: [
+            // 1. Map Background
+            Positioned.fill(
+              child: ColoredBox(
+                color: const Color(0xFFEFF1F4),
+                child: FlutterMap(
+                  mapController: controller.mapController,
+                  options: MapOptions(
+                    initialCenter: controller.pickupLatLng,
+                    initialZoom: 15,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.all,
                     ),
-                  MarkerLayer(markers: controller.markers),
-                ],
-              ),
-            ),
-          ),
-
-          // Guardian Angel Overlay
-          Obx(
-            () => controller.showGuardianAlert.value
-                ? Positioned.fill(
-                    child: Container(
-                      color: Colors.black.withOpacity(0.8),
-                      child: Center(
-                        child: ZoomIn(
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 40),
-                            padding: const EdgeInsets.all(30),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.error.withOpacity(0.1),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.security_rounded,
-                                    color: AppColors.error,
-                                    size: 50,
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                                const Text(
-                                  'Guardian Angel Alert',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'We noticed a route deviation. Are you safe?',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 32),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () =>
-                                            controller.confirmSafety(),
-                                        style: OutlinedButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 16,
-                                          ),
-                                          side: const BorderSide(
-                                            color: Colors.grey,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              15,
-                                            ),
-                                          ),
-                                        ),
-                                        child: const Text(
-                                          'I am Safe',
-                                          style: TextStyle(
-                                            color: Colors.black,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: ElevatedButton(
-                                        onPressed: () => Get.snackbar(
-                                          'Alerting',
-                                          'Emergency contacts notified.',
-                                          backgroundColor: AppColors.error,
-                                          colorText: Colors.white,
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: AppColors.error,
-                                          foregroundColor: Colors.white,
-                                          elevation: 0,
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 16,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              15,
-                                            ),
-                                          ),
-                                        ),
-                                        child: const Text(
-                                          'Help Me',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
-
-          // 2. Top Banner
-          Positioned(
-            top: 60,
-            left: 20,
-            right: 20,
-            child: FadeInDown(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.primaryYellow,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black26, blurRadius: 10),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  ),
                   children: [
-                    const Icon(
-                      Icons.shield_rounded,
-                      color: AppColors.primaryBlack,
-                      size: 20,
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.rapido.ui',
                     ),
-                    const SizedBox(width: 8),
                     Obx(
-                      () => Text(
-                        controller.getStatusTitle(),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                      () => controller.routePoints.isEmpty
+                          ? const SizedBox.shrink()
+                          : PolylineLayer(
+                              polylines: [
+                                Polyline(
+                                  points: controller.routePoints,
+                                  strokeWidth: 5,
+                                  color: Colors.blue,
+                                ),
+                              ],
+                            ),
+                    ),
+                    Obx(
+                      () => MarkerLayer(markers: controller.markers.toList()),
                     ),
                   ],
                 ),
               ),
             ),
-          ),
 
-          // 3. Information Bottom Sheet
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: FadeInUp(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
+            // Debug overlay to verify UI rendering
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Obx(
+                () => Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'status=${controller.rideStatus.value} '
+                    'route=${controller.routePoints.length} '
+                    'driver=${controller.distanceLabel.value.isEmpty ? 'na' : controller.distanceLabel.value}',
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
                 ),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)],
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+              ),
+            ),
+
+            // Guardian Angel Overlay
+            // Obx(
+            //   () => controller.showGuardianAlert.value
+            //       ? Positioned.fill(
+            //           child: Container(
+            //             color: Colors.black.withOpacity(0.8),
+            //             child: Center(
+            //               child: ZoomIn(
+            //                 child: Container(
+            //                   margin: const EdgeInsets.symmetric(
+            //                     horizontal: 40,
+            //                   ),
+            //                   padding: const EdgeInsets.all(30),
+            //                   decoration: BoxDecoration(
+            //                     color: Colors.white,
+            //                     borderRadius: BorderRadius.circular(30),
+            //                   ),
+            //                   child: Column(
+            //                     mainAxisSize: MainAxisSize.min,
+            //                     children: [
+            //                       Container(
+            //                         padding: const EdgeInsets.all(16),
+            //                         decoration: BoxDecoration(
+            //                           color: AppColors.error.withOpacity(0.1),
+            //                           shape: BoxShape.circle,
+            //                         ),
+            //                         child: const Icon(
+            //                           Icons.security_rounded,
+            //                           color: AppColors.error,
+            //                           size: 50,
+            //                         ),
+            //                       ),
+            //                       const SizedBox(height: 24),
+            //                       const Text(
+            //                         'Guardian Angel Alert',
+            //                         style: TextStyle(
+            //                           fontSize: 22,
+            //                           fontWeight: FontWeight.bold,
+            //                         ),
+            //                         textAlign: TextAlign.center,
+            //                       ),
+            //                       const SizedBox(height: 12),
+            //                       const Text(
+            //                         'We noticed a route deviation. Are you safe?',
+            //                         style: TextStyle(
+            //                           fontSize: 14,
+            //                           color: Colors.grey,
+            //                         ),
+            //                         textAlign: TextAlign.center,
+            //                       ),
+            //                       const SizedBox(height: 32),
+            //                       Row(
+            //                         children: [
+            //                           Expanded(
+            //                             child: OutlinedButton(
+            //                               onPressed: () =>
+            //                                   controller.confirmSafety(),
+            //                               style: OutlinedButton.styleFrom(
+            //                                 padding: const EdgeInsets.symmetric(
+            //                                   vertical: 16,
+            //                                 ),
+            //                                 side: const BorderSide(
+            //                                   color: Colors.grey,
+            //                                 ),
+            //                                 shape: RoundedRectangleBorder(
+            //                                   borderRadius:
+            //                                       BorderRadius.circular(15),
+            //                                 ),
+            //                               ),
+            //                               child: const Text(
+            //                                 'I am Safe',
+            //                                 style: TextStyle(
+            //                                   color: Colors.black,
+            //                                   fontWeight: FontWeight.bold,
+            //                                 ),
+            //                               ),
+            //                             ),
+            //                           ),
+            //                           const SizedBox(width: 12),
+            //                           Expanded(
+            //                             child: ElevatedButton(
+            //                               onPressed: () => Get.snackbar(
+            //                                 'Alerting',
+            //                                 'Emergency contacts notified.',
+            //                                 backgroundColor: AppColors.error,
+            //                                 colorText: Colors.white,
+            //                               ),
+            //                               style: ElevatedButton.styleFrom(
+            //                                 backgroundColor: AppColors.error,
+            //                                 foregroundColor: Colors.white,
+            //                                 elevation: 0,
+            //                                 padding: const EdgeInsets.symmetric(
+            //                                   vertical: 16,
+            //                                 ),
+            //                                 shape: RoundedRectangleBorder(
+            //                                   borderRadius:
+            //                                       BorderRadius.circular(15),
+            //                                 ),
+            //                               ),
+            //                               child: const Text(
+            //                                 'Help Me',
+            //                                 style: TextStyle(
+            //                                   fontWeight: FontWeight.bold,
+            //                                 ),
+            //                               ),
+            //                             ),
+            //                           ),
+            //                         ],
+            //                       ),
+            //                     ],
+            //                   ),
+            //                 ),
+            //               ),
+            //             ),
+            //           ),
+            //         )
+            //       : const SizedBox.shrink(),
+            // ),
+
+            // 2. Top Banner
+            Positioned(
+              top: 60,
+              left: 20,
+              right: 20,
+              child: FadeInDown(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryYellow,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 10),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // OTP & Ride Info Header
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Ride Pin: 9821',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'White Honda Activa',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                const Text(
-                                  'KA 01 EK 4567',
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Image.asset(
-                              'assets/images/rides/bike.png',
-                              width: 60,
-                            ),
-                          ),
-                        ],
+                      const Icon(
+                        Icons.shield_rounded,
+                        color: AppColors.primaryBlack,
+                        size: 20,
                       ),
-                      const SizedBox(height: 20),
-                      const Divider(),
-                      const SizedBox(height: 20),
-
-                      // Captain Card
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 28,
-                            backgroundColor: AppColors.primaryYellow,
-                            child: const Icon(
-                              Icons.person,
-                              size: 35,
-                              color: AppColors.primaryBlack,
-                            ),
+                      const SizedBox(width: 8),
+                      Obx(
+                        () => Text(
+                          controller.getStatusTitle(),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  controller.rider.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.star_rounded,
-                                      color: AppColors.primaryYellow,
-                                      size: 16,
-                                    ),
-                                    Text(
-                                      controller.rider.rating.toString(),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Text(
-                                        '| 1200+ Rides',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 12,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          _buildCircleAction(
-                            Icons.phone_rounded,
-                            AppColors.success,
-                            controller.callRider,
-                          ),
-                          const SizedBox(width: 12),
-                          _buildCircleAction(
-                            Icons.chat_bubble_rounded,
-                            AppColors.info,
-                            controller.chatWithRider,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // Safety Indicator
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.green[50],
-                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.verified_user_rounded,
-                              color: AppColors.success,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Your ride is insured. Travel safely!',
-                                style: TextStyle(
-                                  color: Colors.green[800],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
+                      ),
+                      Obx(
+                        () => controller.distanceLabel.value.isEmpty
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(left: 10),
+                                child: Text(
+                                  controller.distanceLabel.value,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Cancel Button
-                      SizedBox(
-                        child: TextButton(
-                          onPressed: () => Get.back(),
-                          child: const Text(
-                            'Cancel Ride',
-                            style: TextStyle(
-                              color: AppColors.error,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
                       ),
                     ],
                   ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-    );
+
+            // 3. Information Bottom Sheet
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: FadeInUp(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(30),
+                    ),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black12, blurRadius: 15),
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // OTP & Ride Info Header
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ride Pin: 9821',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'White Honda Activa',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'KA 01 EK 4567',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Image.asset(
+                                'assets/images/rides/bike.png',
+                                width: 60,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        const Divider(),
+                        const SizedBox(height: 20),
+
+                        // Captain Card
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 28,
+                              backgroundColor: AppColors.primaryYellow,
+                              child: const Icon(
+                                Icons.person,
+                                size: 35,
+                                color: AppColors.primaryBlack,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    controller.rider.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.star_rounded,
+                                        color: AppColors.primaryYellow,
+                                        size: 16,
+                                      ),
+                                      Text(
+                                        controller.rider.rating.toString(),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          '| 1200+ Rides',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _buildCircleAction(
+                              Icons.phone_rounded,
+                              AppColors.success,
+                              controller.callRider,
+                            ),
+                            const SizedBox(width: 12),
+                            _buildCircleAction(
+                              Icons.chat_bubble_rounded,
+                              AppColors.info,
+                              controller.chatWithRider,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Safety Indicator
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green[50],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.verified_user_rounded,
+                                color: AppColors.success,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Your ride is insured. Travel safely!',
+                                  style: TextStyle(
+                                    color: Colors.green[800],
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Cancel Button
+                        SizedBox(
+                          child: TextButton(
+                            onPressed: () => Get.back(),
+                            child: const Text(
+                              'Cancel Ride',
+                              style: TextStyle(
+                                color: AppColors.error,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Widget _buildCircleAction(IconData icon, Color color, VoidCallback onTap) {

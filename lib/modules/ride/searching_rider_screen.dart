@@ -133,10 +133,12 @@ class SearchingRiderController extends GetxController
         .onValue
         .listen((event) {
           final Object? data = event.snapshot.value;
+          debugPrint('DriverListener: snapshot=${data.runtimeType} data=$data');
           final List<LatLng> points = [];
           if (data is Map<dynamic, dynamic>) {
             data.forEach((_, value) {
               if (value is Map<dynamic, dynamic>) {
+                debugPrint('DriverListener: raw driver=$value');
                 final double lat = (value['lat'] ?? 0).toDouble();
                 final double lng = (value['lng'] ?? 0).toDouble();
                 final double distance = Geolocator.distanceBetween(
@@ -146,11 +148,15 @@ class SearchingRiderController extends GetxController
                   lng,
                 );
                 if (distance <= _nearbyRadiusMeters) {
+                  debugPrint(
+                    'DriverListener: within radius lat=$lat lng=$lng distance=$distance',
+                  );
                   points.add(LatLng(lat, lng));
                 }
               }
             });
           }
+          debugPrint('DriverListener: points=${points.length}');
           driverPoints.assignAll(points);
           _updateMarkers();
         });

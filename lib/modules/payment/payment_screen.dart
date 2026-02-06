@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../core/colors.dart';
+import '../home/home_content.dart';
 
 /// Payment controller
 class PaymentController extends GetxController {
@@ -28,6 +29,9 @@ class PaymentController extends GetxController {
 
     Future.delayed(const Duration(seconds: 2), () {
       isProcessing.value = false;
+      if (Get.isRegistered<HomeContentController>()) {
+        Get.find<HomeContentController>().clearRideSelection();
+      }
       Get.offAllNamed('/home');
       Get.snackbar(
         'Success',

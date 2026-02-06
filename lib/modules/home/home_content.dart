@@ -39,6 +39,7 @@ class HomeContentController extends GetxController {
   final RxBool searching = false.obs;
   final Rx<ActiveSearchField> activeField = ActiveSearchField.pickup.obs;
   Timer? _searchDebounce;
+  final RxBool pickingOnMap = false.obs;
 
   LatLng? pickupLatLng;
   LatLng? dropLatLng;
@@ -123,10 +124,12 @@ class HomeContentController extends GetxController {
 
   void setActiveField(ActiveSearchField field) {
     activeField.value = field;
+    pickingOnMap.value = false;
   }
 
   void onSearchChanged(String value) {
     _searchDebounce?.cancel();
+    pickingOnMap.value = false;
     if (activeField.value == ActiveSearchField.pickup) {
       pickupLatLng = null;
     } else {
@@ -150,6 +153,48 @@ class HomeContentController extends GetxController {
       searchResults.assignAll(results);
       searching.value = false;
     });
+  }
+
+  void startMapPick(ActiveSearchField field) {
+    activeField.value = field;
+    pickingOnMap.value = true;
+    searchResults.clear();
+    Get.snackbar(
+      'Select on map',
+      field == ActiveSearchField.pickup
+          ? 'Tap on the map to set pickup location'
+          : 'Tap on the map to set drop location',
+      backgroundColor: AppColors.primaryBlack,
+      colorText: Colors.white,
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  void onMapTap(LatLng location) {
+    if (!pickingOnMap.value) return;
+    if (activeField.value == ActiveSearchField.pickup) {
+      pickupLatLng = location;
+      pickupController.text = 'Pickup location';
+    } else {
+      dropLatLng = location;
+      dropController.text = 'Drop location';
+    }
+    mapController.move(location, 16);
+    pickingOnMap.value = false;
+    _updateMarkers();
+    _tryBuildRoute();
+  }
+
+  void clearRideSelection() {
+    pickupLatLng = null;
+    dropLatLng = null;
+    pickupController.text = '';
+    dropController.text = '';
+    routePoints.clear();
+    searchResults.clear();
+    pickingOnMap.value = false;
+    _updateMarkers();
   }
 
   void selectSearchResult(PlaceSearchResult result) {
@@ -370,6 +415,7 @@ class HomeContent extends StatelessWidget {
               options: MapOptions(
                 initialCenter: controller.currentPosition.value,
                 initialZoom: 16,
+                onTap: (tapPosition, latLng) => controller.onMapTap(latLng),
                 interactionOptions: const InteractionOptions(
                   flags: InteractiveFlag.all,
                 ),
@@ -855,6 +901,13 @@ class HomeContent extends StatelessWidget {
                   Icons.my_location,
                   color: AppColors.success,
                 ),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.map_rounded),
+                  onPressed: () {
+                    Get.back();
+                    controller.startMapPick(ActiveSearchField.pickup);
+                  },
+                ),
                 hintText: 'From',
                 fillColor: Colors.grey[100],
               ),
@@ -868,6 +921,13 @@ class HomeContent extends StatelessWidget {
                 prefixIcon: const Icon(
                   Icons.location_on,
                   color: AppColors.error,
+                ),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.map_rounded),
+                  onPressed: () {
+                    Get.back();
+                    controller.startMapPick(ActiveSearchField.drop);
+                  },
                 ),
                 hintText: 'To',
                 fillColor: Colors.grey[100],
